@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scalping Tool</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Broker Selection Modal -->
+    <div id="broker-modal" class="modal active">
+        <div class="modal-box">
+            <h2>🏦 Select Broker</h2>
+            <div class="broker-options">
+                <button class="broker-btn zerodha" onclick="selectBroker('ZERODHA')">
+                    <span class="broker-icon">Z</span>
+                    <span>Zerodha</span>
+                    <small>Manual Price Entry</small>
+                </button>
+                <button class="broker-btn fyers" onclick="selectBroker('FYERS')">
+                    <span class="broker-icon">F</span>
+                    <span>Fyers</span>
+                    <small>Live Prices ✨</small>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App -->
+    <div id="app" class="hidden">
+        <!-- Header -->
+        <header>
+            <h1>⚡ Scalper</h1>
+            <div class="header-right">
+                <span id="broker-tag" class="tag"></span>
+                <span id="user-name"></span>
+                <button onclick="logout()" class="btn-icon" title="Logout">🚪</button>
+            </div>
+        </header>
+
+        <!-- Index Cards (Fyers - with Live Prices) -->
+        <div id="index-cards" class="index-cards hidden">
+            <div class="index-card" data-index="NIFTY" onclick="selectIndex('NIFTY')">
+                <div class="index-name">NIFTY 50</div>
+                <div class="index-price" id="nifty-price">--</div>
+                <div class="index-change" id="nifty-change"></div>
+            </div>
+            <div class="index-card" data-index="BANKNIFTY" onclick="selectIndex('BANKNIFTY')">
+                <div class="index-name">BANK NIFTY</div>
+                <div class="index-price" id="banknifty-price">--</div>
+                <div class="index-change" id="banknifty-change"></div>
+            </div>
+            <div class="index-card" data-index="SENSEX" onclick="selectIndex('SENSEX')">
+                <div class="index-name">SENSEX</div>
+                <div class="index-price" id="sensex-price">--</div>
+                <div class="index-change" id="sensex-change"></div>
+            </div>
+        </div>
+
+        <!-- Simple Index Select (Zerodha - no live prices) -->
+        <div id="simple-index" class="simple-select hidden">
+            <label>Select Index</label>
+            <div class="btn-group">
+                <button class="btn-select" data-index="NIFTY" onclick="selectIndex('NIFTY')">NIFTY</button>
+                <button class="btn-select" data-index="BANKNIFTY" onclick="selectIndex('BANKNIFTY')">BANKNIFTY</button>
+                <button class="btn-select" data-index="SENSEX" onclick="selectIndex('SENSEX')">SENSEX</button>
+            </div>
+        </div>
+
+        <!-- Trade Form -->
+        <div id="trade-form" class="card hidden">
+            <h3 id="form-title">New Trade</h3>
+
+            <!-- Expiry -->
+            <div class="form-row">
+                <label>Expiry</label>
+                <div id="expiry-btns" class="btn-group">
+                    <span style="color:var(--muted)">Select index first</span>
+                </div>
+            </div>
+
+            <!-- Option Type -->
+            <div class="form-row">
+                <label>Option Type</label>
+                <div class="btn-group type-group">
+                    <button id="btn-ce" class="btn-opt" onclick="selectType('CE')">📈 CE (Call)</button>
+                    <button id="btn-pe" class="btn-opt" onclick="selectType('PE')">📉 PE (Put)</button>
+                </div>
+            </div>
+
+            <!-- Strike -->
+            <div class="form-row">
+                <label>Strike Price <span style="color:var(--muted)">(10 above/below ATM)</span></label>
+                <select id="strike-select" onchange="onStrikeChange()">
+                    <option value="">Select Expiry First</option>
+                </select>
+                <span id="strike-ltp" class="ltp-badge hidden"></span>
+            </div>
+
+            <!-- Entry Price -->
+            <div class="form-row">
+                <label>Entry Price ₹</label>
+                <input type="number" id="entry-price" placeholder="Enter your entry price" step="0.05">
+            </div>
+
+            <!-- Lots -->
+            <div class="form-row">
+                <label>Quantity</label>
+                <div class="lot-input">
+                    <button onclick="changeLots(-1)">−</button>
+                    <input type="number" id="lots" value="1" readonly>
+                    <button onclick="changeLots(1)">+</button>
+                    <span id="qty-display" class="qty">= 65 qty</span>
+                </div>
+            </div>
+
+            <!-- SL Info -->
+            <div id="sl-info" class="sl-info hidden">
+                ⚠️ Stop Loss: <span id="sl-price">--</span> <small>(Entry - 5 points)</small>
+            </div>
+
+            <!-- Submit -->
+            <button id="submit-btn" class="btn-submit" onclick="placeTrade()" disabled>
+                🚀 Place Trade
+            </button>
+        </div>
+
+        <!-- Status Message -->
+        <div id="status" class="status hidden"></div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

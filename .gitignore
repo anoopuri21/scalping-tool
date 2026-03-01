@@ -1,0 +1,75 @@
+# ============ SENSITIVE FILES ============
+# Never commit these!
+
+# Environment variables
+.env
+*.env
+
+# API Tokens
+*_token.json
+zerodha_token.json
+fyers_token.json
+access_token.json
+
+# ============ PYTHON ============
+
+# Virtual environment
+venv/
+env/
+ENV/
+.venv
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# ============ NODE.JS (if using) ============
+
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# ============ IDE ============
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+
+# ============ OS ============
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# macOS
+.DS_Store
+.AppleDouble
+
+# Linux
+*~
+
+# ============ LOGS ============
+
+*.log
+logs/
+
+# ============ TEMPORARY ============
+
+*.tmp
+*.bak
+*.swp
+*.swo
+temp/
+tmp/

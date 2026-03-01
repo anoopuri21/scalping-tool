@@ -1,0 +1,448 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+    --bg: #0a0a0a;
+    --card: #141414;
+    --border: #262626;
+    --text: #fafafa;
+    --muted: #737373;
+    --green: #22c55e;
+    --red: #ef4444;
+    --blue: #3b82f6;
+}
+
+body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 16px;
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+.hidden { display: none !important; }
+
+/* ============ MODAL ============ */
+.modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.95);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal.active {
+    display: flex;
+}
+
+.modal-box {
+    background: var(--card);
+    padding: 32px;
+    border-radius: 16px;
+    text-align: center;
+    max-width: 420px;
+    width: 90%;
+    border: 1px solid var(--border);
+}
+
+.modal-box h2 {
+    margin-bottom: 24px;
+    font-size: 1.25rem;
+}
+
+.broker-options {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.broker-btn {
+    padding: 24px 16px;
+    background: var(--bg);
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    color: var(--text);
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.broker-btn:hover {
+    transform: translateY(-2px);
+}
+
+.broker-btn.zerodha:hover { border-color: #387ed1; }
+.broker-btn.fyers:hover { border-color: var(--green); }
+
+.broker-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1.5rem;
+    color: white;
+}
+
+.zerodha .broker-icon { background: #387ed1; }
+.fyers .broker-icon { background: var(--green); }
+
+.broker-btn span:nth-child(2) {
+    font-weight: 600;
+}
+
+.broker-btn small {
+    color: var(--muted);
+    font-size: 0.7rem;
+}
+
+/* ============ HEADER ============ */
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+header h1 {
+    font-size: 1.25rem;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.tag {
+    padding: 4px 10px;
+    background: var(--blue);
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+#user-name {
+    color: var(--green);
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.btn-icon {
+    background: none;
+    border: none;
+    font-size: 1.25rem;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+
+.btn-icon:hover { opacity: 1; }
+
+/* ============ INDEX CARDS ============ */
+.index-cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.index-card {
+    background: var(--card);
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 10px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.index-card:hover {
+    border-color: var(--blue);
+}
+
+.index-card.selected {
+    border-color: var(--blue);
+    background: rgba(59, 130, 246, 0.1);
+}
+
+.index-name {
+    font-size: 0.65rem;
+    color: var(--muted);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.index-price {
+    font-size: 1.1rem;
+    font-weight: 700;
+    font-family: 'SF Mono', Monaco, monospace;
+}
+
+.index-change {
+    font-size: 0.7rem;
+    margin-top: 4px;
+    font-weight: 500;
+}
+
+.index-change.up { color: var(--green); }
+.index-change.down { color: var(--red); }
+
+/* ============ SIMPLE SELECT ============ */
+.simple-select {
+    margin-bottom: 16px;
+}
+
+.simple-select > label {
+    display: block;
+    color: var(--muted);
+    font-size: 0.7rem;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* ============ CARD ============ */
+.card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+}
+
+.card h3 {
+    font-size: 1rem;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--blue);
+}
+
+/* ============ FORM ============ */
+.form-row {
+    margin-bottom: 16px;
+}
+
+.form-row > label {
+    display: block;
+    color: var(--muted);
+    font-size: 0.7rem;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.btn-group {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.type-group {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+}
+
+.btn-select, .btn-opt {
+    padding: 10px 16px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+}
+
+.btn-select:hover, .btn-opt:hover {
+    border-color: var(--blue);
+}
+
+.btn-select.selected {
+    background: var(--blue);
+    border-color: var(--blue);
+    color: white;
+}
+
+.btn-opt.ce.selected {
+    background: var(--green);
+    border-color: var(--green);
+    color: white;
+}
+
+.btn-opt.pe.selected {
+    background: var(--red);
+    border-color: var(--red);
+    color: white;
+}
+
+select, input[type="number"] {
+    width: 100%;
+    padding: 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 0.95rem;
+    font-family: inherit;
+}
+
+select:focus, input:focus {
+    outline: none;
+    border-color: var(--blue);
+}
+
+select option {
+    background: var(--bg);
+    color: var(--text);
+}
+
+.ltp-badge {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 6px 12px;
+    background: var(--green);
+    color: #000;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+/* ============ LOT INPUT ============ */
+.lot-input {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.lot-input button {
+    width: 40px;
+    height: 40px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 1.25rem;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.lot-input button:hover {
+    background: var(--border);
+}
+
+.lot-input input {
+    width: 60px;
+    text-align: center;
+    font-weight: 600;
+}
+
+.qty {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin-left: 8px;
+}
+
+/* ============ SL INFO ============ */
+.sl-info {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid var(--red);
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+    margin-bottom: 16px;
+    color: var(--red);
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.sl-info small {
+    opacity: 0.7;
+}
+
+/* ============ SUBMIT BUTTON ============ */
+.btn-submit {
+    width: 100%;
+    padding: 14px;
+    background: var(--green);
+    border: none;
+    border-radius: 8px;
+    color: #000;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-submit:hover:not(:disabled) {
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+}
+
+.btn-submit:disabled {
+    background: var(--border);
+    color: var(--muted);
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* ============ STATUS ============ */
+.status {
+    margin-top: 16px;
+    padding: 14px;
+    border-radius: 8px;
+    text-align: center;
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.status.success {
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--green);
+    border: 1px solid var(--green);
+}
+
+.status.error {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--red);
+    border: 1px solid var(--red);
+}
+/* ATM Option in Dropdown */
+select option.atm-option {
+    font-weight: bold;
+    background: rgba(34, 197, 94, 0.1);
+}
+
+/* Make dropdown wider to show LTP */
+#strike-select {
+    font-family: 'SF Mono', Monaco, Consolas, monospace;
+    font-size: 0.85rem;
+}
+
+/* ============ RESPONSIVE ============ */
+@media (max-width: 480px) {
+    .index-cards {
+        grid-template-columns: 1fr;
+    }
+    
+    .broker-options {
+        grid-template-columns: 1fr;
+    }
+    
+    .type-group {
+        grid-template-columns: 1fr;
+    }
+}
