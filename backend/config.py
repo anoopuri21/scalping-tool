@@ -5,18 +5,15 @@ load_dotenv()
 
 # ============ BROKER CREDENTIALS ============
 
-# Zerodha
 ZERODHA_API_KEY = os.getenv("ZERODHA_API_KEY", "")
 ZERODHA_API_SECRET = os.getenv("ZERODHA_API_SECRET", "")
 
-# Fyers
 FYERS_APP_ID = os.getenv("FYERS_APP_ID", "")
 FYERS_SECRET_KEY = os.getenv("FYERS_SECRET_KEY", "")
 FYERS_REDIRECT_URL = os.getenv("FYERS_REDIRECT_URL", "http://127.0.0.1:8000/auth/fyers/callback")
 
 
 # ============ LOT SIZES ============
-# Update these when lot sizes change
 
 LOT_SIZES = {
     "NIFTY": 65,
@@ -25,8 +22,7 @@ LOT_SIZES = {
 }
 
 
-# ============ STRIKE STEP SIZES ============
-# Difference between consecutive strikes
+# ============ STRIKE SETTINGS ============
 
 STRIKE_STEPS = {
     "NIFTY": 50,
@@ -34,25 +30,22 @@ STRIKE_STEPS = {
     "SENSEX": 100,
 }
 
-
-# ============ DEFAULT ATM PRICES ============
-# Fallback prices when live data unavailable
-
 DEFAULT_ATM = {
-    "NIFTY": 22500,
-    "BANKNIFTY": 48000,
-    "SENSEX": 73500,
+    "NIFTY": 25000,
+    "BANKNIFTY": 50000,
+    "SENSEX": 75000,
 }
 
-
-# ============ TRADING CONFIG ============
-
-SL_POINTS = 5  # Stop loss points below entry
-STRIKES_ABOVE_ATM = 10  # Number of strikes to show above ATM
-STRIKES_BELOW_ATM = 10  # Number of strikes to show below ATM
+STRIKES_ABOVE_ATM = 10
+STRIKES_BELOW_ATM = 10
 
 
-# ============ INDEX SYMBOLS (Fyers) ============
+# ============ DEFAULT SL (User can change in UI) ============
+
+DEFAULT_SL_POINTS = 5
+
+
+# ============ FYERS INDEX SYMBOLS ============
 
 FYERS_INDEX_SYMBOLS = {
     "NIFTY": "NSE:NIFTY50-INDEX",
@@ -61,7 +54,17 @@ FYERS_INDEX_SYMBOLS = {
 }
 
 
-# ============ SERVER CONFIG ============
+# ============ CANDLE TIMEFRAMES ============
+
+CANDLE_TIMEFRAMES = {
+    "5min": 5,
+    "15min": 15,
+    "30min": 30,
+    "1hr": 60,
+}
+
+
+# ============ SERVER ============
 
 HOST = "127.0.0.1"
 PORT = 8000

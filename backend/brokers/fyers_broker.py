@@ -1,6 +1,6 @@
 from fyers_apiv3 import fyersModel
 from typing import Optional, List, Dict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import json
 import os
 from .base_broker import BaseBroker
@@ -13,6 +13,90 @@ class FyersBroker(BaseBroker):
     BROKER_NAME = "FYERS"
     HAS_QUOTE_API = True
     TOKEN_FILE = "fyers_token.json"
+    
+    # Month codes for weekly options (Fyers specific)
+    MONTH_CODES = {
+        1: '1', 2: '2', 3: '3', 4: '4', 5: '5', 6: '6',
+        7: '7', 8: '8', 9: '9', 10: 'O', 11: 'N', 12: 'D'
+    }
+    
+    def get_candle_data(self, symbol: str, timeframe: int) -> Optional[dict]:
+        """
+        Get previous candle close/low for the given timeframe.  The argument may
+        be an underlying index (e.g. "NIFTY") or a fully‑qualified symbol
+        ("NFO:NIFTY23FEB15000CE").
+        """
+        try:
+            # normalize to Fyers format; if the caller passed a raw index name
+            # look it up in the config table.  Otherwise assume the symbol is
+            # already valid.
+            if ":" not in symbol:
+                symbol = config.FYERS_INDEX_SYMBOLS.get(symbol.upper(), symbol)
+            if not symbol:
+                return None
+            
+            # Fyers resolution format
+            resolution_map = {
+                5: "5",
+                15: "15",
+                30: "30",
+                60: "60",
+            }
+            resolution = resolution_map.get(timeframe, "5")
+            
+            # Get last 2 candles
+            from datetime import datetime, timedelta
+            
+            now = datetime.now()
+            # Go back enough time to get at least 2 candles
+            range_from = now - timedelta(minutes=timeframe * 3)
+            range_to = now
+            
+            data = {
+                "symbol": symbol,
+                "resolution": resolution,
+                "date_format": "1",  # epoch
+                "range_from": int(range_from.timestamp()),
+                "range_to": int(range_to.timestamp()),
+                "cont_flag": "1",
+            }
+            
+            response = self.fyers.history(data)
+            
+            if response.get("s") == "ok" and "candles" in response:
+                candles = response["candles"]
+                
+                if len(candles) >= 2:
+                    # Previous completed candle (second to last)
+                    prev_candle = candles[-2]
+                    # Format: [timestamp, open, high, low, close, volume]
+                    return {
+                        "timeframe": f"{timeframe}min" if timeframe < 60 else "1hr",
+                        "timestamp": prev_candle[0],
+                        "open": prev_candle[1],
+                        "high": prev_candle[2],
+                        "low": prev_candle[3],
+                        "close": prev_candle[4],
+                        "volume": prev_candle[5],
+                    }
+                elif len(candles) == 1:
+                    candle = candles[0]
+                    return {
+                        "timeframe": f"{timeframe}min" if timeframe < 60 else "1hr",
+                        "timestamp": candle[0],
+                        "open": candle[1],
+                        "high": candle[2],
+                        "low": candle[3],
+                        "close": candle[4],
+                        "volume": candle[5],
+                    }
+            
+            print(f"⚠️ Candle data not found: {response}")
+            return None
+            
+        except Exception as e:
+            print(f"❌ Fyers candle data error: {e}")
+            return None
     
     def __init__(self):
         super().__init__()
@@ -96,9 +180,10 @@ class FyersBroker(BaseBroker):
             print("📥 Fyers: Loading instruments...")
             self.instruments_cache.clear()
             
-            # Fetch index prices first
+            # Fetch index prices
             self._fetch_all_index_prices()
             
+            # Get expiries
             expiries = self._get_expiries()
             
             for index in ["NIFTY", "BANKNIFTY", "SENSEX"]:
@@ -107,12 +192,12 @@ class FyersBroker(BaseBroker):
                 lot = config.LOT_SIZES.get(index, 50)
                 exchange = "BFO" if index == "SENSEX" else "NFO"
                 
-                # Get base price
+                # Get current price
                 base = self.index_prices.get(index) or config.DEFAULT_ATM.get(index, 22500)
                 base = round(base / step) * step
                 
                 for expiry in exp_list[:4]:
-                    for offset in range(-40, 41):
+                    for offset in range(-30, 31):
                         strike = int(base + (offset * step))
                         if strike <= 0:
                             continue
@@ -132,10 +217,38 @@ class FyersBroker(BaseBroker):
             
             self.instruments_loaded = True
             print(f"✅ Fyers: {len(self.instruments_cache)} instruments")
+            
+            # Test a symbol
+            self._test_symbol()
+            
             return True
         except Exception as e:
             print(f"❌ Fyers: Load failed - {e}")
+            import traceback
+            traceback.print_exc()
             return False
+    
+    def _test_symbol(self):
+        """Test symbol with actual Fyers API"""
+        try:
+            nifty_price = self.index_prices.get("NIFTY", 25000)
+            atm = round(nifty_price / 50) * 50
+            
+            expiries = self._get_expiries()
+            if expiries.get("NIFTY"):
+                expiry = expiries["NIFTY"][0]
+                symbol = self._make_symbol("NIFTY", atm, "CE", expiry)
+                
+                print(f"🧪 Testing symbol: {symbol}")
+                response = self.fyers.quotes({"symbols": symbol})
+                
+                if response.get("s") == "ok" and "d" in response:
+                    ltp = response["d"][0].get("v", {}).get("lp") if response["d"] else None
+                    print(f"🧪 Response: Status={response.get('s')}, LTP={ltp}")
+                else:
+                    print(f"🧪 Response: {response}")
+        except Exception as e:
+            print(f"🧪 Symbol test error: {e}")
     
     def _fetch_all_index_prices(self):
         try:
@@ -150,51 +263,84 @@ class FyersBroker(BaseBroker):
                     for name, sym in config.FYERS_INDEX_SYMBOLS.items():
                         if symbol == sym and price > 0:
                             self.index_prices[name] = price
-                            print(f"  {name}: {price}")
+                            print(f"  📊 {name}: {price}")
                             break
         except Exception as e:
             print(f"⚠️ Fyers: Index price fetch failed - {e}")
     
     def _get_expiries(self) -> dict:
+        """Get upcoming expiry dates - FIXED VERSION"""
         today = datetime.now().date()
         expiries = {"NIFTY": [], "BANKNIFTY": [], "SENSEX": []}
         
-        current = today
-        while len(expiries["NIFTY"]) < 8:
-            days_ahead = (3 - current.weekday()) % 7
-            if days_ahead == 0 and current != today:
-                days_ahead = 7
-            next_thu = current + timedelta(days=days_ahead)
-            
-            if next_thu >= today:
-                exp_str = next_thu.strftime("%Y-%m-%d")
+        print(f"📅 Today is: {today} (Weekday: {today.weekday()})")
+        
+        # Find next 8 Thursdays for NIFTY/BANKNIFTY
+        current_date = today
+        
+        for _ in range(60):  # Check next 60 days
+            # Thursday is weekday 3
+            if current_date.weekday() == 3 and current_date >= today:
+                exp_str = current_date.strftime("%Y-%m-%d")
                 if exp_str not in expiries["NIFTY"]:
                     expiries["NIFTY"].append(exp_str)
                     expiries["BANKNIFTY"].append(exp_str)
+                    
+                if len(expiries["NIFTY"]) >= 8:
+                    break
             
-            current = next_thu + timedelta(days=1)
+            current_date += timedelta(days=1)
         
-        current = today
-        while len(expiries["SENSEX"]) < 8:
-            days_ahead = (4 - current.weekday()) % 7
-            if days_ahead == 0 and current != today:
-                days_ahead = 7
-            next_fri = current + timedelta(days=days_ahead)
-            
-            if next_fri >= today:
-                exp_str = next_fri.strftime("%Y-%m-%d")
+        # Find next 8 Fridays for SENSEX
+        current_date = today
+        
+        for _ in range(60):
+            # Friday is weekday 4
+            if current_date.weekday() == 4 and current_date >= today:
+                exp_str = current_date.strftime("%Y-%m-%d")
                 if exp_str not in expiries["SENSEX"]:
                     expiries["SENSEX"].append(exp_str)
+                    
+                if len(expiries["SENSEX"]) >= 8:
+                    break
             
-            current = next_fri + timedelta(days=1)
+            current_date += timedelta(days=1)
+        
+        print(f"📅 NIFTY expiries: {expiries['NIFTY'][:3]}")
+        print(f"📅 SENSEX expiries: {expiries['SENSEX'][:3]}")
         
         return expiries
     
     def _make_symbol(self, index: str, strike: int, opt_type: str, expiry: str) -> str:
+        """
+        Construct Fyers option symbol
+        Format: NFO:NIFTY2530525200CE
+        """
         d = datetime.strptime(expiry, "%Y-%m-%d")
-        month_str = d.strftime("%y%b").upper()
+        year = d.strftime("%y")
+        day = d.strftime("%d")
+        month_num = d.month
+        month_name = d.strftime("%b").upper()
+        
         exchange = "BFO" if index == "SENSEX" else "NFO"
-        return f"{exchange}:{index}{month_str}{strike}{opt_type}"
+        
+        # Check if monthly expiry (last Thursday/Friday)
+        is_monthly = self._is_monthly_expiry(d)
+        
+        if is_monthly:
+            # Monthly: NIFTY25MAR25200CE
+            symbol = f"{exchange}:{index}{year}{month_name}{strike}{opt_type}"
+        else:
+            # Weekly: NIFTY2530525200CE (YY + MonthCode + DD + Strike)
+            month_code = self.MONTH_CODES.get(month_num, str(month_num))
+            symbol = f"{exchange}:{index}{year}{month_code}{day}{strike}{opt_type}"
+        
+        return symbol
+    
+    def _is_monthly_expiry(self, expiry_date: datetime) -> bool:
+        """Check if expiry is monthly (last Thursday/Friday of month)"""
+        next_week = expiry_date + timedelta(days=7)
+        return next_week.month != expiry_date.month
     
     def get_expiry_dates(self, index: str) -> List[str]:
         expiries = set()
@@ -215,7 +361,7 @@ class FyersBroker(BaseBroker):
         inst = self.instruments_cache.get(key)
         if inst:
             return inst["symbol"]
-        return self._make_symbol(index, strike, option_type, expiry)
+        return self._make_symbol(index.upper(), strike, option_type.upper(), expiry)
     
     def get_index_quote(self, index: str) -> Optional[dict]:
         try:
@@ -238,7 +384,6 @@ class FyersBroker(BaseBroker):
                     "change_percent": v.get("chp", 0),
                 }
             
-            # Return cached
             if index.upper() in self.index_prices:
                 return {"price": self.index_prices[index.upper()], "change": 0, "change_percent": 0}
             
@@ -250,17 +395,48 @@ class FyersBroker(BaseBroker):
             return None
     
     def get_ltp(self, symbol: str, exchange: str = None) -> Optional[float]:
+        """Get LTP for an option or index.
+
+        The broker sometimes requires different prefixing, so if the first
+        request returns nothing we try a couple of reasonable alternatives
+        before giving up.
+        """
         try:
             if not symbol.startswith(("NSE:", "NFO:", "BSE:", "BFO:")):
                 symbol = f"{exchange or 'NFO'}:{symbol}"
             
+            print(f"📡 Fetching LTP: {symbol}")
+            
             response = self.fyers.quotes({"symbols": symbol})
             
+            print(f"📡 Response: {response}")
+            
             if response.get("s") == "ok" and "d" in response and len(response["d"]) > 0:
-                return response["d"][0].get("v", {}).get("lp")
+                ltp = response["d"][0].get("v", {}).get("lp")
+                if ltp:
+                    print(f"✅ LTP: {ltp}")
+                    return ltp
+            
+            # try alternate prefixes if nothing came back
+            if symbol.startswith("NFO:"):
+                alt = symbol.replace("NFO:", "NSE:")
+            elif symbol.startswith("NSE:"):
+                alt = symbol.replace("NSE:", "NFO:")
+            else:
+                alt = None
+            if alt:
+                print(f"📡 retrying LTP with alternate prefix {alt}")
+                response = self.fyers.quotes({"symbols": alt})
+                if response.get("s") == "ok" and "d" in response and len(response["d"]) > 0:
+                    ltp = response["d"][0].get("v", {}).get("lp")
+                    if ltp:
+                        print(f"✅ LTP (alt): {ltp}")
+                        return ltp
+            
+            print(f"⚠️ No LTP in response")
             return None
         except Exception as e:
-            print(f"❌ Fyers: LTP failed - {e}")
+            print(f"❌ Fyers LTP failed: {e}")
             return None
     
     def place_order(self, symbol: str, exchange: str, transaction_type: str,
