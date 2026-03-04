@@ -56,6 +56,10 @@ class BaseBroker(ABC):
     def place_order(self, symbol: str, exchange: str, transaction_type: str,
                     quantity: int, order_type: str, price: float) -> Optional[str]:
         pass
+
+    def get_recent_candles(self, symbol: str, resolution: str = "5", count: int = 3) -> List[dict]:
+        """Return recent candles for a symbol as list of {timestamp, low, close}."""
+        return []
     
     # ============ COMMON METHODS (Use Config) ============
     

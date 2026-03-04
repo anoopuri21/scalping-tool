@@ -257,11 +257,81 @@ class FyersBroker(BaseBroker):
             response = self.fyers.quotes({"symbols": symbol})
             
             if response.get("s") == "ok" and "d" in response and len(response["d"]) > 0:
-                return response["d"][0].get("v", {}).get("lp")
+                ltp = response["d"][0].get("v", {}).get("lp")
+                return float(ltp) if ltp is not None else None
             return None
         except Exception as e:
             print(f"❌ Fyers: LTP failed - {e}")
             return None
+
+    def get_option_chain_ltp(self, index: str) -> Dict[int, dict]:
+        """Fetch option chain and map strike -> {ce_ltp, pe_ltp, ce_symbol, pe_symbol}."""
+        chain_map: Dict[int, dict] = {}
+        try:
+            symbol = config.FYERS_INDEX_SYMBOLS.get(index.upper())
+            if not symbol:
+                return chain_map
+
+            response = self.fyers.optionchain({"symbol": symbol, "strikecount": 30, "timestamp": ""})
+            if response.get("s") != "ok":
+                return chain_map
+
+            for item in response.get("data", {}).get("optionsChain", []):
+                strike = item.get("strike_price")
+                option_type = item.get("option_type")
+                if strike is None or option_type not in ["CE", "PE"]:
+                    continue
+
+                if strike not in chain_map:
+                    chain_map[strike] = {
+                        "ce_ltp": None,
+                        "pe_ltp": None,
+                        "ce_symbol": None,
+                        "pe_symbol": None,
+                    }
+
+                chain_map[strike][f"{option_type.lower()}_ltp"] = item.get("ltp")
+                chain_map[strike][f"{option_type.lower()}_symbol"] = item.get("symbol")
+
+            return chain_map
+        except Exception as e:
+            print(f"⚠️ Fyers: Option chain fetch failed - {e}")
+            return chain_map
+
+    def get_recent_candles(self, symbol: str, resolution: str = "5", count: int = 3) -> List[dict]:
+        try:
+            if not symbol:
+                return []
+
+            to_date = datetime.now().date()
+            from_date = to_date - timedelta(days=5)
+
+            response = self.fyers.history({
+                "symbol": symbol,
+                "resolution": resolution,
+                "date_format": "1",
+                "range_from": from_date.strftime("%Y-%m-%d"),
+                "range_to": to_date.strftime("%Y-%m-%d"),
+                "cont_flag": "1",
+            })
+
+            candles = response.get("candles", []) if isinstance(response, dict) else []
+            if not candles:
+                return []
+
+            recent = candles[-count:]
+            result = []
+            for candle in recent:
+                # [timestamp, open, high, low, close, volume]
+                result.append({
+                    "timestamp": candle[0],
+                    "low": candle[3],
+                    "close": candle[4],
+                })
+            return result
+        except Exception as e:
+            print(f"⚠️ Fyers: Candle fetch failed - {e}")
+            return []
     
     def place_order(self, symbol: str, exchange: str, transaction_type: str,
                     quantity: int, order_type: str = "MARKET", price: float = 0) -> Optional[str]:
