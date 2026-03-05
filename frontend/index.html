@@ -7,17 +7,66 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div id="broker-modal" class="modal active"><div class="modal-box"><h2>🔐 Login with Fyers</h2><div class="broker-options"><button class="broker-btn fyers" onclick="loginFyers()"><span class="broker-icon">F</span><span>Continue with Fyers</span><small>Only Fyers users can access this app</small></button></div></div></div>
+    <div id="broker-modal" class="modal active">
+        <div class="modal-box">
+            <h2>🔐 Login with Fyers</h2>
+            <button class="broker-btn fyers" onclick="loginFyers()">Continue with Fyers</button>
+        </div>
+    </div>
+
     <div id="app" class="hidden">
-        <header><h1>⚡ Scalper</h1><div class="header-right"><span id="broker-tag" class="tag"></span><span id="user-name"></span><button onclick="logout()" class="btn-icon">🚪</button></div></header>
+        <header>
+            <h1>⚡ Scalper</h1>
+            <div class="header-right">
+                <button class="btn-secondary" onclick="openDashboardModal()">📊 Live Dashboard</button>
+                <span id="user-name"></span>
+                <button onclick="logout()" class="btn-icon" title="Logout">🚪</button>
+            </div>
+        </header>
+
         <div id="index-cards" class="index-cards hidden">
-            <div class="index-card" data-index="NIFTY" onclick="selectIndex('NIFTY')"><div class="index-name">NIFTY 50</div><div class="index-price" id="nifty-price">--</div><div class="index-change" id="nifty-change"></div></div>
-            <div class="index-card" data-index="BANKNIFTY" onclick="selectIndex('BANKNIFTY')"><div class="index-name">BANK NIFTY</div><div class="index-price" id="banknifty-price">--</div><div class="index-change" id="banknifty-change"></div></div>
-            <div class="index-card" data-index="SENSEX" onclick="selectIndex('SENSEX')"><div class="index-name">SENSEX</div><div class="index-price" id="sensex-price">--</div><div class="index-change" id="sensex-change"></div></div>
+            <div class="index-card" data-index="NIFTY" onclick="selectIndex('NIFTY')">
+                <div class="index-name">NIFTY 50</div><div class="index-price" id="nifty-price">--</div><div class="index-change" id="nifty-change"></div>
+            </div>
+            <div class="index-card" data-index="BANKNIFTY" onclick="selectIndex('BANKNIFTY')">
+                <div class="index-name">BANK NIFTY</div><div class="index-price" id="banknifty-price">--</div><div class="index-change" id="banknifty-change"></div>
+            </div>
+            <div class="index-card" data-index="SENSEX" onclick="selectIndex('SENSEX')">
+                <div class="index-name">SENSEX</div><div class="index-price" id="sensex-price">--</div><div class="index-change" id="sensex-change"></div>
+            </div>
         </div>
 
-        <div class="card dashboard">
-            <h3>📊 Live Dashboard</h3>
+        <div id="trade-form" class="card hidden">
+            <h3>Place Trade</h3>
+            <div class="form-row"><label>Expiry</label><div id="expiry-btns" class="btn-group"><span style="color:var(--muted)">Select index first</span></div></div>
+            <div class="form-row"><label>Option Type</label><div class="btn-group type-group"><button id="btn-ce" class="btn-opt" onclick="selectType('CE')">CE</button><button id="btn-pe" class="btn-opt" onclick="selectType('PE')">PE</button></div></div>
+            <div class="form-row"><label>Strike</label><select id="strike-select" onchange="onStrikeChange()"><option value="">Select Expiry First</option></select><span id="strike-ltp" class="ltp-badge hidden"></span></div>
+            <div class="form-row"><label>Order Type</label><select id="order-type" onchange="onOrderTypeChange()"><option value="MARKET">MARKET</option><option value="LIMIT">LIMIT</option><option value="STOP_LIMIT">STOP_LIMIT</option></select></div>
+            <div class="form-row"><label>Entry Price ₹</label><input type="number" id="entry-price" step="0.05" placeholder="Auto for MARKET, manual for LIMIT"></div>
+            <div id="trigger-wrap" class="form-row hidden"><label>Trigger Price ₹ (for STOP_LIMIT)</label><input type="number" id="trigger-price" step="0.05"></div>
+
+            <div class="form-row"><label>SL Mode</label><select id="sl-mode" onchange="onSLModeChange()"><option value="candle">Candle Based (min low of last 5 candles)</option><option value="fixed">Fixed</option></select></div>
+            <div id="candle-wrap" class="form-row">
+                <label>Candle Settings</label>
+                <div class="grid-3">
+                    <select id="candle-resolution" onchange="fetchSLReference()"><option value="1">1m</option><option value="3">3m</option></select>
+                    <input type="number" id="candle-count" value="5" min="5" max="20" onchange="fetchSLReference()">
+                    <input type="number" id="sl-offset" value="0" step="0.05" placeholder="Offset" onchange="fetchSLReference()">
+                </div>
+            </div>
+            <div id="fixed-wrap" class="form-row hidden"><label>Fixed SL ₹</label><input type="number" id="fixed-sl" step="0.05"></div>
+            <div id="candle-info" class="sl-info hidden">Candle min low: <b id="last-low">--</b> | Suggested SL: <b id="suggested-sl">--</b></div>
+            <div id="sl-info" class="sl-info">Active SL: <span id="sl-price">--</span></div>
+
+            <div class="form-row"><label>Quantity</label><div class="lot-input"><button onclick="changeLots(-1)">−</button><input type="number" id="lots" value="1" readonly><button onclick="changeLots(1)">+</button><span id="qty-display" class="qty">= 65 qty</span></div></div>
+            <button id="submit-btn" class="btn-submit" onclick="placeTrade()" disabled>🚀 Place Trade</button>
+        </div>
+        <div id="status" class="status hidden"></div>
+    </div>
+
+    <div id="dashboard-modal" class="modal">
+        <div class="modal-box dashboard-box">
+            <div class="dashboard-head"><h3>📊 Live Dashboard</h3><button class="btn-icon" onclick="closeDashboardModal()">✖</button></div>
             <div class="metrics">
                 <div><small>Open Trades</small><b id="metric-open">0</b></div>
                 <div><small>Total PnL</small><b id="metric-pnl">₹0.00</b></div>
@@ -26,27 +75,8 @@
             </div>
             <table class="trade-table"><thead><tr><th>ID</th><th>Symbol</th><th>Order</th><th>Qty</th><th>LTP</th><th>SL</th><th>PnL</th></tr></thead><tbody id="trades-body"><tr><td colspan="7">No open trades</td></tr></tbody></table>
         </div>
-
-        <div id="trade-form" class="card hidden">
-            <h3>New Trade</h3>
-            <div class="form-row"><label>Expiry</label><div id="expiry-btns" class="btn-group"><span style="color:var(--muted)">Select index first</span></div></div>
-            <div class="form-row"><label>Option Type</label><div class="btn-group type-group"><button id="btn-ce" class="btn-opt" onclick="selectType('CE')">📈 CE</button><button id="btn-pe" class="btn-opt" onclick="selectType('PE')">📉 PE</button></div></div>
-            <div class="form-row"><label>Strike</label><select id="strike-select" onchange="onStrikeChange()"><option>Select Expiry First</option></select><span id="strike-ltp" class="ltp-badge hidden"></span></div>
-            <div class="form-row"><label>Entry Price</label><input type="number" id="entry-price" step="0.05"></div>
-            <div class="form-row"><label>Order Type</label><select id="order-type" onchange="toggleOrderInputs()"><option>MARKET</option><option>LIMIT</option><option>STOP_LIMIT</option></select></div>
-            <div id="limit-wrap" class="form-row hidden"><label>Limit Price</label><input type="number" id="limit-price" step="0.05"></div>
-            <div id="trigger-wrap" class="form-row hidden"><label>Trigger Price</label><input type="number" id="trigger-price" step="0.05"></div>
-            <div class="form-row"><label>SL Mode</label><select id="sl-mode" onchange="toggleSLInputs()"><option value="candle">Candle Based</option><option value="fixed">Fixed</option></select></div>
-            <div id="fixed-sl-wrap" class="form-row hidden"><label>Fixed SL</label><input type="number" id="fixed-sl" step="0.05"></div>
-            <div id="candle-sl-wrap" class="form-row"><label>Candle Config</label><div class="grid-3"><select id="candle-resolution" onchange="fetchSLReference()"><option value="5">5m</option><option value="15">15m</option></select><input id="candle-count" type="number" value="3" min="1" max="20"><input id="sl-offset" type="number" value="0" step="0.05" placeholder="Offset"></div></div>
-            <div id="candle-info" class="sl-info hidden">🕯️ Candle min low: <b id="last-3-low">--</b> | Suggested SL: <b id="suggested-sl">--</b></div>
-            <div class="form-row"><label>Trailing SL points (optional)</label><input id="trailing-sl" type="number" step="0.05"></div>
-            <div class="form-row"><label>Quantity</label><div class="lot-input"><button onclick="changeLots(-1)">−</button><input type="number" id="lots" value="1" readonly><button onclick="changeLots(1)">+</button><span id="qty-display" class="qty">= 65 qty</span></div></div>
-            <div id="sl-info" class="sl-info">⚠️ Active Stop Loss: <span id="sl-price">--</span></div>
-            <button id="submit-btn" class="btn-submit" onclick="placeTrade()" disabled>🚀 Place Trade</button>
-        </div>
-        <div id="status" class="status hidden"></div>
     </div>
-<script src="app.js"></script>
+
+    <script src="app.js"></script>
 </body>
 </html>

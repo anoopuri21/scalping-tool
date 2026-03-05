@@ -453,3 +453,30 @@ select option.atm-option {
 .trade-table { width:100%; border-collapse:collapse; font-size:0.8rem; }
 .trade-table th,.trade-table td { border-bottom:1px solid var(--border); padding:6px; text-align:left; }
 .grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+
+.btn-secondary {
+    background: var(--blue);
+    border: none;
+    color: white;
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.75rem;
+}
+
+.dashboard-box {
+    max-width: 1000px;
+    width: 95%;
+    text-align: left;
+}
+
+.dashboard-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+#entry-price[readonly] {
+    opacity: 0.75;
+}

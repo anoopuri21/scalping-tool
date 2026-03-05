@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 import asyncio
 import os
+import time
 from datetime import datetime
 from typing import Literal
 
@@ -23,17 +24,15 @@ class TradeRequest(BaseModel):
     option_type: Literal["CE", "PE"]
     strike_price: int
     expiry: str
-    entry_price: float | None = None
     lots: int = 1
+    order_type: Literal["MARKET", "LIMIT", "STOP_LIMIT"] = "MARKET"
+    entry_price: float | None = None
+    trigger_price: float | None = None
     sl_mode: Literal["fixed", "candle"] = "candle"
     fixed_sl: float | None = None
     sl_offset: float = 0.0
-    candle_resolution: Literal["5", "15"] = "5"
-    candle_count: int = Field(default=3, ge=1, le=20)
-    order_type: Literal["MARKET", "LIMIT", "STOP_LIMIT"] = "MARKET"
-    limit_price: float | None = None
-    trigger_price: float | None = None
-    trailing_sl_points: float | None = None
+    candle_resolution: Literal["1", "3"] = "1"
+    candle_count: int = Field(default=5, ge=5, le=20)
 
 
 async def refresh_instruments_job():
@@ -81,11 +80,9 @@ def retry_place_order(*, symbol: str, exchange: str, transaction_type: str, quan
         )
         if order_id:
             return order_id, attempt
-
         if attempt < retries:
             delay = base_delay * (2 ** (attempt - 1))
             print(f"⏳ Retry order attempt {attempt + 1}/{retries} in {delay:.2f}s")
-            import time
             time.sleep(delay)
     return None, retries
 
@@ -94,12 +91,10 @@ def compute_trade_metrics() -> dict:
     open_trades = [t for t in trade_book.values() if t["status"] == "OPEN"]
     total_pnl = sum(t.get("pnl", 0) for t in open_trades)
     total_positions = sum(t.get("quantity", 0) for t in open_trades)
-    win_trades = len([t for t in trade_book.values() if t.get("pnl", 0) > 0])
     return {
         "open_trades": len(open_trades),
         "total_positions": total_positions,
         "total_pnl": total_pnl,
-        "win_rate": (win_trades / len(trade_book) * 100) if trade_book else 0,
         "orders_with_retries": len([t for t in trade_book.values() if t.get("order_attempts", 1) > 1]),
     }
 
@@ -113,6 +108,8 @@ async def get_config():
         "broker": "FYERS",
         "order_types": ["MARKET", "LIMIT", "STOP_LIMIT"],
         "sl_modes": ["fixed", "candle"],
+        "candle_resolutions": ["1", "3"],
+        "default_candle_count": 5,
     }
 
 
@@ -208,37 +205,22 @@ async def get_strikes(index: str, expiry: str = Query(...)):
         chain_info = chain_map.get(strike, {})
         ce_symbol = chain_info.get("ce_symbol") or current_broker.get_option_symbol(index, strike, "CE", expiry)
         pe_symbol = chain_info.get("pe_symbol") or current_broker.get_option_symbol(index, strike, "PE", expiry)
-
-        ce_ltp = chain_info.get("ce_ltp")
-        pe_ltp = chain_info.get("pe_ltp")
-
-        if ce_ltp is None and ce_symbol:
-            ce_ltp = current_broker.get_ltp(ce_symbol, current_broker.get_exchange(index))
-        if pe_ltp is None and pe_symbol:
-            pe_ltp = current_broker.get_ltp(pe_symbol, current_broker.get_exchange(index))
-
         strikes_data.append({
             "strike": strike,
             "is_atm": strike == actual_atm,
-            "ce_ltp": ce_ltp,
-            "pe_ltp": pe_ltp,
+            "ce_ltp": chain_info.get("ce_ltp"),
+            "pe_ltp": chain_info.get("pe_ltp"),
             "ce_symbol": ce_symbol,
             "pe_symbol": pe_symbol,
         })
 
-    return {
-        "strikes": strikes_data,
-        "atm": actual_atm,
-        "total": len(all_strikes),
-        "has_ltp": True,
-    }
+    return {"strikes": strikes_data, "atm": actual_atm, "total": len(all_strikes), "has_ltp": True}
 
 
 @app.get("/api/index-quote/{index}")
 async def get_index_quote(index: str):
     if not current_broker.is_authenticated:
         return {"price": None}
-
     quote = current_broker.get_index_quote(index)
     return quote if quote else {"price": None}
 
@@ -251,35 +233,27 @@ async def get_ltp(index: str, strike: int, option_type: str, expiry: str):
     symbol = current_broker.get_option_symbol(index, strike, option_type, expiry)
     exchange = current_broker.get_exchange(index)
     ltp = current_broker.get_ltp(symbol, exchange)
-
     return {"symbol": symbol, "ltp": ltp, "exchange": exchange}
 
 
 @app.get("/api/sl-reference")
 async def sl_reference(index: str, strike: int, option_type: str, expiry: str,
-                       resolution: str = Query("5"), count: int = Query(3, ge=1, le=20),
+                       resolution: str = Query("1"), count: int = Query(5, ge=5, le=20),
                        offset: float = Query(0.0)):
     if not current_broker.is_authenticated:
-        return {"candles": [], "min_low": None, "last_close": None, "suggested_sl": None}
+        return {"candles": [], "min_low": None, "suggested_sl": None}
 
     symbol = current_broker.get_option_symbol(index, strike, option_type, expiry)
     candles = current_broker.get_recent_candles(symbol=symbol, resolution=resolution, count=count)
 
-    if not candles:
-        return {"candles": [], "min_low": None, "last_close": None, "suggested_sl": None}
-
     lows = [float(c["low"]) for c in candles if c.get("low") is not None]
-    closes = [float(c["close"]) for c in candles if c.get("close") is not None]
-
     min_low = min(lows) if lows else None
-    last_close = closes[-1] if closes else None
-    suggested_sl = (min_low - offset) if min_low is not None else last_close
+    suggested_sl = (min_low - offset) if min_low is not None else None
 
     return {
         "symbol": symbol,
         "candles": candles,
         "min_low": min_low,
-        "last_close": last_close,
         "suggested_sl": suggested_sl,
         "resolution": resolution,
         "count": count,
@@ -299,12 +273,13 @@ async def place_trade(req: TradeRequest):
     exchange = current_broker.get_exchange(req.index)
     live_ltp = current_broker.get_ltp(symbol, exchange)
 
-    entry_price = req.entry_price
-    if entry_price is None or entry_price <= 0:
+    if req.order_type == "MARKET":
         entry_price = live_ltp
+    else:
+        entry_price = req.entry_price
 
     if entry_price is None or entry_price <= 0:
-        return {"success": False, "error": "Unable to fetch LTP. Enter entry price manually."}
+        return {"success": False, "error": "Entry price unavailable. Use LIMIT with manual entry or retry MARKET."}
 
     if req.sl_mode == "fixed" and req.fixed_sl and req.fixed_sl > 0:
         sl_price = req.fixed_sl
@@ -318,7 +293,7 @@ async def place_trade(req: TradeRequest):
     lot_size = config.LOT_SIZES.get(req.index.upper(), 50)
     quantity = req.lots * lot_size
 
-    price = req.limit_price if req.order_type in ["LIMIT", "STOP_LIMIT"] else 0
+    order_price = entry_price if req.order_type in ["LIMIT", "STOP_LIMIT"] else 0
     trigger_price = req.trigger_price if req.order_type == "STOP_LIMIT" else 0
 
     order_id, attempts = retry_place_order(
@@ -327,44 +302,44 @@ async def place_trade(req: TradeRequest):
         transaction_type="BUY",
         quantity=quantity,
         order_type=req.order_type,
-        price=price or 0,
+        price=order_price,
         trigger_price=trigger_price or 0,
     )
 
-    if order_id:
-        trade_id = f"T{len(trade_book) + 1:04d}"
-        trade_book[trade_id] = {
-            "trade_id": trade_id,
-            "symbol": symbol,
-            "index": req.index,
-            "option_type": req.option_type,
-            "strike": req.strike_price,
-            "expiry": req.expiry,
-            "order_type": req.order_type,
-            "entry_price": entry_price,
-            "ltp": live_ltp or entry_price,
-            "sl_price": sl_price,
-            "trailing_sl_points": req.trailing_sl_points,
-            "quantity": quantity,
-            "lots": req.lots,
-            "status": "OPEN",
-            "order_id": order_id,
-            "order_attempts": attempts,
-            "pnl": 0.0,
-            "created_at": datetime.now().isoformat(),
-        }
-        return {
-            "success": True,
-            "order_id": order_id,
-            "trade_id": trade_id,
-            "message": f"Order placed: {symbol} x {quantity}",
-            "entry_price": entry_price,
-            "live_ltp": live_ltp,
-            "sl_price": sl_price,
-            "order_attempts": attempts,
-        }
+    if not order_id:
+        return {"success": False, "error": "Order failed after retries"}
 
-    return {"success": False, "error": "Order failed after retries"}
+    trade_id = f"T{len(trade_book) + 1:04d}"
+    trade_book[trade_id] = {
+        "trade_id": trade_id,
+        "symbol": symbol,
+        "index": req.index,
+        "option_type": req.option_type,
+        "strike": req.strike_price,
+        "expiry": req.expiry,
+        "order_type": req.order_type,
+        "entry_price": entry_price,
+        "ltp": live_ltp or entry_price,
+        "sl_price": sl_price,
+        "quantity": quantity,
+        "lots": req.lots,
+        "status": "OPEN",
+        "order_id": order_id,
+        "order_attempts": attempts,
+        "pnl": 0.0,
+        "created_at": datetime.now().isoformat(),
+    }
+
+    return {
+        "success": True,
+        "order_id": order_id,
+        "trade_id": trade_id,
+        "message": f"Order placed: {symbol} x {quantity}",
+        "entry_price": entry_price,
+        "live_ltp": live_ltp,
+        "sl_price": sl_price,
+        "order_attempts": attempts,
+    }
 
 
 @app.get("/api/dashboard")
@@ -376,12 +351,9 @@ async def dashboard_data():
         if trade["status"] != "OPEN":
             continue
         ltp = current_broker.get_ltp(trade["symbol"], current_broker.get_exchange(trade["index"]))
-        if ltp:
+        if ltp is not None:
             trade["ltp"] = ltp
             trade["pnl"] = (ltp - trade["entry_price"]) * trade["quantity"]
-            if trade.get("trailing_sl_points"):
-                new_sl = ltp - float(trade["trailing_sl_points"])
-                trade["sl_price"] = max(trade["sl_price"], new_sl)
 
     return {"trades": list(trade_book.values()), "metrics": compute_trade_metrics(), "updated_at": datetime.now().isoformat()}
 
@@ -391,8 +363,7 @@ async def dashboard_ws(websocket: WebSocket):
     await websocket.accept()
     try:
         while True:
-            snapshot = await dashboard_data()
-            await websocket.send_json(snapshot)
+            await websocket.send_json(await dashboard_data())
             await asyncio.sleep(1)
     except WebSocketDisconnect:
         return
