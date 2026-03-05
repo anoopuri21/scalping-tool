@@ -7,28 +7,20 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Broker Selection Modal -->
     <div id="broker-modal" class="modal active">
         <div class="modal-box">
-            <h2>🏦 Select Broker</h2>
+            <h2>🔐 Login with Fyers</h2>
             <div class="broker-options">
-                <button class="broker-btn zerodha" onclick="selectBroker('ZERODHA')">
-                    <span class="broker-icon">Z</span>
-                    <span>Zerodha</span>
-                    <small>Manual Price Entry</small>
-                </button>
-                <button class="broker-btn fyers" onclick="selectBroker('FYERS')">
+                <button class="broker-btn fyers" onclick="loginFyers()">
                     <span class="broker-icon">F</span>
-                    <span>Fyers</span>
-                    <small>Live Prices ✨</small>
+                    <span>Continue with Fyers</span>
+                    <small>Only Fyers users can access this app</small>
                 </button>
             </div>
         </div>
     </div>
 
-    <!-- Main App -->
     <div id="app" class="hidden">
-        <!-- Header -->
         <header>
             <h1>⚡ Scalper</h1>
             <div class="header-right">
@@ -38,7 +30,6 @@
             </div>
         </header>
 
-        <!-- Index Cards (Fyers - with Live Prices) -->
         <div id="index-cards" class="index-cards hidden">
             <div class="index-card" data-index="NIFTY" onclick="selectIndex('NIFTY')">
                 <div class="index-name">NIFTY 50</div>
@@ -57,21 +48,9 @@
             </div>
         </div>
 
-        <!-- Simple Index Select (Zerodha - no live prices) -->
-        <div id="simple-index" class="simple-select hidden">
-            <label>Select Index</label>
-            <div class="btn-group">
-                <button class="btn-select" data-index="NIFTY" onclick="selectIndex('NIFTY')">NIFTY</button>
-                <button class="btn-select" data-index="BANKNIFTY" onclick="selectIndex('BANKNIFTY')">BANKNIFTY</button>
-                <button class="btn-select" data-index="SENSEX" onclick="selectIndex('SENSEX')">SENSEX</button>
-            </div>
-        </div>
-
-        <!-- Trade Form -->
         <div id="trade-form" class="card hidden">
             <h3 id="form-title">New Trade</h3>
 
-            <!-- Expiry -->
             <div class="form-row">
                 <label>Expiry</label>
                 <div id="expiry-btns" class="btn-group">
@@ -79,7 +58,6 @@
                 </div>
             </div>
 
-            <!-- Option Type -->
             <div class="form-row">
                 <label>Option Type</label>
                 <div class="btn-group type-group">
@@ -88,7 +66,6 @@
                 </div>
             </div>
 
-            <!-- Strike -->
             <div class="form-row">
                 <label>Strike Price <span style="color:var(--muted)">(10 above/below ATM)</span></label>
                 <select id="strike-select" onchange="onStrikeChange()">
@@ -97,13 +74,20 @@
                 <span id="strike-ltp" class="ltp-badge hidden"></span>
             </div>
 
-            <!-- Entry Price -->
-            <div class="form-row">
-                <label>Entry Price ₹</label>
-                <input type="number" id="entry-price" placeholder="Enter your entry price" step="0.05">
+            <div id="candle-info" class="sl-info hidden">
+                🕯️ Last 3 candles low: <b id="last-3-low">--</b> | Last close: <b id="last-close">--</b> | Suggested SL: <b id="suggested-sl">--</b>
             </div>
 
-            <!-- Lots -->
+            <div class="form-row">
+                <label>Entry Price ₹</label>
+                <input type="number" id="entry-price" placeholder="Auto-fetched from LTP" step="0.05">
+            </div>
+
+            <div class="form-row">
+                <label>Manual SL ₹ (optional)</label>
+                <input type="number" id="manual-sl" placeholder="Optional manual stop-loss" step="0.05">
+            </div>
+
             <div class="form-row">
                 <label>Quantity</label>
                 <div class="lot-input">
@@ -114,18 +98,15 @@
                 </div>
             </div>
 
-            <!-- SL Info -->
             <div id="sl-info" class="sl-info hidden">
-                ⚠️ Stop Loss: <span id="sl-price">--</span> <small>(Entry - 5 points)</small>
+                ⚠️ Active Stop Loss: <span id="sl-price">--</span> <small id="sl-source"></small>
             </div>
 
-            <!-- Submit -->
             <button id="submit-btn" class="btn-submit" onclick="placeTrade()" disabled>
                 🚀 Place Trade
             </button>
         </div>
 
-        <!-- Status Message -->
         <div id="status" class="status hidden"></div>
     </div>
 
