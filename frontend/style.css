@@ -446,3 +446,10 @@ select option.atm-option {
         grid-template-columns: 1fr;
     }
 }
+.dashboard { margin-bottom: 16px; }
+.metrics { display:grid; grid-template-columns: repeat(4,1fr); gap:8px; margin-bottom:12px; }
+.metrics div { background: var(--bg); border:1px solid var(--border); border-radius:8px; padding:8px; text-align:center; }
+.metrics small { display:block; color:var(--muted); font-size:0.7rem; }
+.trade-table { width:100%; border-collapse:collapse; font-size:0.8rem; }
+.trade-table th,.trade-table td { border-bottom:1px solid var(--border); padding:6px; text-align:left; }
+.grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }

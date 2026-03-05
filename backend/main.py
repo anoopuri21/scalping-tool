@@ -1,39 +1,107 @@
 from contextlib import asynccontextmanager
+import asyncio
 import os
+from datetime import datetime
+from typing import Literal
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import uvicorn
 
 import config
 from brokers.fyers_broker import FyersBroker
 
 current_broker = FyersBroker()
+trade_book: dict[str, dict] = {}
+instrument_refresh_task: asyncio.Task | None = None
 
 
 class TradeRequest(BaseModel):
     index: str
-    option_type: str
+    option_type: Literal["CE", "PE"]
     strike_price: int
     expiry: str
     entry_price: float | None = None
     lots: int = 1
-    manual_sl: float | None = None
+    sl_mode: Literal["fixed", "candle"] = "candle"
+    fixed_sl: float | None = None
+    sl_offset: float = 0.0
+    candle_resolution: Literal["5", "15"] = "5"
+    candle_count: int = Field(default=3, ge=1, le=20)
+    order_type: Literal["MARKET", "LIMIT", "STOP_LIMIT"] = "MARKET"
+    limit_price: float | None = None
+    trigger_price: float | None = None
+    trailing_sl_points: float | None = None
+
+
+async def refresh_instruments_job():
+    while True:
+        try:
+            if current_broker.is_authenticated:
+                current_broker.load_instruments()
+                print(f"🔄 Instrument cache refresh complete at {datetime.now().isoformat()}")
+        except Exception as e:
+            print(f"⚠️ Instrument refresh failed: {e}")
+        await asyncio.sleep(900)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global instrument_refresh_task
     print("🚀 Scalping Tool Started (FYERS only)")
     print(f"📊 Lot Sizes: {config.LOT_SIZES}")
+    if current_broker.is_authenticated:
+        current_broker.load_instruments()
+    instrument_refresh_task = asyncio.create_task(refresh_instruments_job())
     yield
+    if instrument_refresh_task:
+        instrument_refresh_task.cancel()
     print("🛑 Shutdown")
 
 
 app = FastAPI(title="Scalping Tool", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
                    allow_methods=["*"], allow_headers=["*"])
+
+
+def retry_place_order(*, symbol: str, exchange: str, transaction_type: str, quantity: int,
+                      order_type: str, price: float, trigger_price: float,
+                      retries: int = 3, base_delay: float = 0.6) -> tuple[str | None, int]:
+    for attempt in range(1, retries + 1):
+        order_id = current_broker.place_order(
+            symbol=symbol,
+            exchange=exchange,
+            transaction_type=transaction_type,
+            quantity=quantity,
+            order_type=order_type,
+            price=price,
+            trigger_price=trigger_price,
+        )
+        if order_id:
+            return order_id, attempt
+
+        if attempt < retries:
+            delay = base_delay * (2 ** (attempt - 1))
+            print(f"⏳ Retry order attempt {attempt + 1}/{retries} in {delay:.2f}s")
+            import time
+            time.sleep(delay)
+    return None, retries
+
+
+def compute_trade_metrics() -> dict:
+    open_trades = [t for t in trade_book.values() if t["status"] == "OPEN"]
+    total_pnl = sum(t.get("pnl", 0) for t in open_trades)
+    total_positions = sum(t.get("quantity", 0) for t in open_trades)
+    win_trades = len([t for t in trade_book.values() if t.get("pnl", 0) > 0])
+    return {
+        "open_trades": len(open_trades),
+        "total_positions": total_positions,
+        "total_pnl": total_pnl,
+        "win_rate": (win_trades / len(trade_book) * 100) if trade_book else 0,
+        "orders_with_retries": len([t for t in trade_book.values() if t.get("order_attempts", 1) > 1]),
+    }
 
 
 @app.get("/api/config")
@@ -43,6 +111,8 @@ async def get_config():
         "strike_steps": config.STRIKE_STEPS,
         "sl_points": config.SL_POINTS,
         "broker": "FYERS",
+        "order_types": ["MARKET", "LIMIT", "STOP_LIMIT"],
+        "sl_modes": ["fixed", "candle"],
     }
 
 
@@ -186,29 +256,34 @@ async def get_ltp(index: str, strike: int, option_type: str, expiry: str):
 
 
 @app.get("/api/sl-reference")
-async def sl_reference(index: str, strike: int, option_type: str, expiry: str):
+async def sl_reference(index: str, strike: int, option_type: str, expiry: str,
+                       resolution: str = Query("5"), count: int = Query(3, ge=1, le=20),
+                       offset: float = Query(0.0)):
     if not current_broker.is_authenticated:
-        return {"candles": [], "last_3_low": None, "last_close": None, "suggested_sl": None}
+        return {"candles": [], "min_low": None, "last_close": None, "suggested_sl": None}
 
     symbol = current_broker.get_option_symbol(index, strike, option_type, expiry)
-    candles = current_broker.get_recent_candles(symbol=symbol, resolution="5", count=3)
+    candles = current_broker.get_recent_candles(symbol=symbol, resolution=resolution, count=count)
 
     if not candles:
-        return {"candles": [], "last_3_low": None, "last_close": None, "suggested_sl": None}
+        return {"candles": [], "min_low": None, "last_close": None, "suggested_sl": None}
 
     lows = [float(c["low"]) for c in candles if c.get("low") is not None]
     closes = [float(c["close"]) for c in candles if c.get("close") is not None]
 
-    last_3_low = min(lows) if lows else None
+    min_low = min(lows) if lows else None
     last_close = closes[-1] if closes else None
-    suggested_sl = last_3_low if last_3_low is not None else last_close
+    suggested_sl = (min_low - offset) if min_low is not None else last_close
 
     return {
         "symbol": symbol,
         "candles": candles,
-        "last_3_low": last_3_low,
+        "min_low": min_low,
         "last_close": last_close,
         "suggested_sl": suggested_sl,
+        "resolution": resolution,
+        "count": count,
+        "offset": offset,
     }
 
 
@@ -231,35 +306,96 @@ async def place_trade(req: TradeRequest):
     if entry_price is None or entry_price <= 0:
         return {"success": False, "error": "Unable to fetch LTP. Enter entry price manually."}
 
-    sl_price = req.manual_sl
-    if sl_price is None:
-        candles = current_broker.get_recent_candles(symbol=symbol, resolution="5", count=3)
+    if req.sl_mode == "fixed" and req.fixed_sl and req.fixed_sl > 0:
+        sl_price = req.fixed_sl
+    elif req.sl_mode == "candle":
+        candles = current_broker.get_recent_candles(symbol=symbol, resolution=req.candle_resolution, count=req.candle_count)
         lows = [float(c["low"]) for c in candles if c.get("low") is not None]
-        sl_price = min(lows) if lows else (entry_price - config.SL_POINTS)
+        sl_price = (min(lows) - req.sl_offset) if lows else (entry_price - config.SL_POINTS)
+    else:
+        sl_price = entry_price - config.SL_POINTS
 
     lot_size = config.LOT_SIZES.get(req.index.upper(), 50)
     quantity = req.lots * lot_size
 
-    order_id = current_broker.place_order(
+    price = req.limit_price if req.order_type in ["LIMIT", "STOP_LIMIT"] else 0
+    trigger_price = req.trigger_price if req.order_type == "STOP_LIMIT" else 0
+
+    order_id, attempts = retry_place_order(
         symbol=symbol,
         exchange=exchange,
         transaction_type="BUY",
         quantity=quantity,
-        order_type="MARKET",
-        price=0,
+        order_type=req.order_type,
+        price=price or 0,
+        trigger_price=trigger_price or 0,
     )
 
     if order_id:
+        trade_id = f"T{len(trade_book) + 1:04d}"
+        trade_book[trade_id] = {
+            "trade_id": trade_id,
+            "symbol": symbol,
+            "index": req.index,
+            "option_type": req.option_type,
+            "strike": req.strike_price,
+            "expiry": req.expiry,
+            "order_type": req.order_type,
+            "entry_price": entry_price,
+            "ltp": live_ltp or entry_price,
+            "sl_price": sl_price,
+            "trailing_sl_points": req.trailing_sl_points,
+            "quantity": quantity,
+            "lots": req.lots,
+            "status": "OPEN",
+            "order_id": order_id,
+            "order_attempts": attempts,
+            "pnl": 0.0,
+            "created_at": datetime.now().isoformat(),
+        }
         return {
             "success": True,
             "order_id": order_id,
+            "trade_id": trade_id,
             "message": f"Order placed: {symbol} x {quantity}",
             "entry_price": entry_price,
             "live_ltp": live_ltp,
             "sl_price": sl_price,
+            "order_attempts": attempts,
         }
 
-    return {"success": False, "error": "Order failed"}
+    return {"success": False, "error": "Order failed after retries"}
+
+
+@app.get("/api/dashboard")
+async def dashboard_data():
+    if not current_broker.is_authenticated:
+        return {"trades": [], "metrics": compute_trade_metrics()}
+
+    for trade in trade_book.values():
+        if trade["status"] != "OPEN":
+            continue
+        ltp = current_broker.get_ltp(trade["symbol"], current_broker.get_exchange(trade["index"]))
+        if ltp:
+            trade["ltp"] = ltp
+            trade["pnl"] = (ltp - trade["entry_price"]) * trade["quantity"]
+            if trade.get("trailing_sl_points"):
+                new_sl = ltp - float(trade["trailing_sl_points"])
+                trade["sl_price"] = max(trade["sl_price"], new_sl)
+
+    return {"trades": list(trade_book.values()), "metrics": compute_trade_metrics(), "updated_at": datetime.now().isoformat()}
+
+
+@app.websocket("/ws/dashboard")
+async def dashboard_ws(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            snapshot = await dashboard_data()
+            await websocket.send_json(snapshot)
+            await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        return
 
 
 SUCCESS_HTML = """<!DOCTYPE html>
