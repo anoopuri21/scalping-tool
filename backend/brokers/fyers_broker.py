@@ -19,7 +19,8 @@ class FyersBroker(BaseBroker):
         super().__init__()
         self.fyers = None
         self.quote_cache: Dict[str, tuple[float, float]] = {}
-        self.quote_cache_ttl = 1.5
+        # Keep cache very short so UI receives near-live prices.
+        self.quote_cache_ttl = 0.4
         self._load_token()
 
     @staticmethod
@@ -74,6 +75,15 @@ class FyersBroker(BaseBroker):
             if symbol and ltp is not None and ltp > 0:
                 result[symbol] = ltp
                 self.quote_cache[symbol] = (ltp, now)
+
+        # If API omits a symbol in response, return fresh-enough cached value
+        # instead of None so market order entry and UI don't break.
+        for symbol in pending:
+            if symbol in result:
+                continue
+            cached = self.quote_cache.get(symbol)
+            if cached and (now - cached[1]) <= 8:
+                result[symbol] = cached[0]
 
         return result
     

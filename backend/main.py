@@ -99,6 +99,22 @@ def compute_trade_metrics() -> dict:
     }
 
 
+def resolve_live_ltp(symbol: str, exchange: str, fallback: float | None = None) -> float | None:
+    """Fetch live price with a small retry window for fast-moving market orders."""
+    ltp = current_broker.get_ltp(symbol, exchange)
+    if ltp is not None and ltp > 0:
+        return ltp
+
+    # Retry quickly to avoid transient quote misses during live trading.
+    for _ in range(2):
+        time.sleep(0.12)
+        ltp = current_broker.get_ltp(symbol, exchange)
+        if ltp is not None and ltp > 0:
+            return ltp
+
+    return fallback
+
+
 @app.get("/api/config")
 async def get_config():
     return {
@@ -254,7 +270,7 @@ async def get_ltp(index: str, strike: int, option_type: str, expiry: str):
 
     symbol = current_broker.get_option_symbol(index, strike, option_type, expiry)
     exchange = current_broker.get_exchange(index)
-    ltp = current_broker.get_ltp(symbol, exchange)
+    ltp = resolve_live_ltp(symbol, exchange)
     return {"symbol": symbol, "ltp": ltp, "exchange": exchange}
 
 
@@ -293,7 +309,7 @@ async def place_trade(req: TradeRequest):
         return {"success": False, "error": "Invalid symbol"}
 
     exchange = current_broker.get_exchange(req.index)
-    live_ltp = current_broker.get_ltp(symbol, exchange)
+    live_ltp = resolve_live_ltp(symbol, exchange)
 
     if req.order_type == "MARKET":
         entry_price = live_ltp
@@ -376,6 +392,12 @@ async def dashboard_data():
         ltp_map = current_broker.get_quotes_batch(symbols)
         for trade in open_trades:
             ltp = ltp_map.get(trade["symbol"])
+            if ltp is None:
+                ltp = resolve_live_ltp(
+                    trade["symbol"],
+                    current_broker.get_exchange(trade["index"]),
+                    fallback=trade.get("ltp"),
+                )
             if ltp is not None:
                 trade["ltp"] = ltp
                 trade["pnl"] = (ltp - trade["entry_price"]) * trade["quantity"]
@@ -395,7 +417,7 @@ async def dashboard_ws(websocket: WebSocket):
     try:
         while True:
             await websocket.send_json(await dashboard_data())
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
     except WebSocketDisconnect:
         return
 
