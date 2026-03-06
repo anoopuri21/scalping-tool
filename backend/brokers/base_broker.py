@@ -54,7 +54,8 @@ class BaseBroker(ABC):
     
     @abstractmethod
     def place_order(self, symbol: str, exchange: str, transaction_type: str,
-                    quantity: int, order_type: str, price: float) -> Optional[str]:
+                    quantity: int, order_type: str, price: float,
+                    trigger_price: float = 0) -> Optional[str]:
         pass
 
     def get_recent_candles(self, symbol: str, resolution: str = "5", count: int = 3) -> List[dict]:

@@ -334,19 +334,21 @@ class FyersBroker(BaseBroker):
             return []
     
     def place_order(self, symbol: str, exchange: str, transaction_type: str,
-                    quantity: int, order_type: str = "MARKET", price: float = 0) -> Optional[str]:
+                    quantity: int, order_type: str = "MARKET", price: float = 0,
+                    trigger_price: float = 0) -> Optional[str]:
         try:
             if not symbol.startswith(("NSE:", "NFO:", "BSE:", "BFO:")):
                 symbol = f"{exchange}:{symbol}"
             
+            fyers_type = 2 if order_type == "MARKET" else (3 if order_type == "STOP_LIMIT" else 1)
             data = {
                 "symbol": symbol,
                 "qty": quantity,
-                "type": 2 if order_type == "MARKET" else 1,
+                "type": fyers_type,
                 "side": 1 if transaction_type == "BUY" else -1,
                 "productType": "INTRADAY",
-                "limitPrice": 0,
-                "stopPrice": 0,
+                "limitPrice": price if order_type in ["LIMIT", "STOP_LIMIT"] else 0,
+                "stopPrice": trigger_price if order_type == "STOP_LIMIT" else 0,
                 "validity": "DAY",
                 "disclosedQty": 0,
                 "offlineOrder": False,
