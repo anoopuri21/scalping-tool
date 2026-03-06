@@ -195,6 +195,12 @@ async function updateEntryPrice() {
 
     let ltp = strikeInfo ? (selectedType === "CE" ? strikeInfo.ce_ltp : strikeInfo.pe_ltp) : null;
 
+    if ((ltp == null || ltp <= 0) && !strikeInfo) {
+        await loadStrikes({ keepSelection: true, silent: true });
+        const refreshed = strikesData.find((s) => s.strike === selectedStrike);
+        ltp = refreshed ? (selectedType === "CE" ? refreshed.ce_ltp : refreshed.pe_ltp) : null;
+    }
+
     if (ltp == null || ltp <= 0) {
         const data = await fetch(`${API}/api/ltp?index=${selectedIndex}&strike=${selectedStrike}&option_type=${selectedType}&expiry=${selectedExpiry}`)
             .then((r) => r.json())
@@ -306,7 +312,13 @@ function renderDashboard(data) {
     document.getElementById("metric-pnl").textContent = `₹${(m.total_pnl || 0).toFixed(2)}`;
     document.getElementById("metric-pos").textContent = m.total_positions || 0;
     document.getElementById("metric-retries").textContent = m.orders_with_retries || 0;
-    document.getElementById("trades-body").innerHTML = (data.trades || []).map((t) => `<tr><td>${t.trade_id}</td><td>${t.symbol}</td><td>${t.order_type}</td><td>${t.quantity}</td><td>${(t.ltp || 0).toFixed(2)}</td><td>${(t.sl_price || 0).toFixed(2)}</td><td class="${(t.pnl || 0) >= 0 ? 'up' : 'down'}">${(t.pnl || 0).toFixed(2)}</td></tr>`).join("") || '<tr><td colspan="7">No open trades</td></tr>';
+    document.getElementById("trades-body").innerHTML = (data.trades || []).map((t) => {
+        const isOpen = t.status === "OPEN";
+        const action = isOpen
+            ? `<button class="btn-close-trade" onclick="closeTrade('${t.trade_id}')">Close</button>`
+            : `<span class="trade-closed">${t.status || "CLOSED"}</span>`;
+        return `<tr><td>${t.trade_id}</td><td>${t.symbol}</td><td>${t.order_type}</td><td>${t.quantity}</td><td>${(t.ltp || 0).toFixed(2)}</td><td>${(t.sl_price || 0).toFixed(2)}</td><td class="${(t.pnl || 0) >= 0 ? 'up' : 'down'}">${(t.pnl || 0).toFixed(2)}</td><td>${action}</td></tr>`;
+    }).join("") || '<tr><td colspan="8">No open trades</td></tr>';
 }
 
 function startDashboardFeed() {
@@ -322,6 +334,18 @@ function startDashboardFeed() {
     } catch {
         startFallbackPolling();
     }
+}
+
+
+
+async function closeTrade(tradeId) {
+    const data = await fetch(`${API}/api/trade/${tradeId}/close`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+    }).then((r) => r.json()).catch((e) => ({ success: false, error: e.message }));
+
+    showStatus(data.success ? `✅ ${data.message}` : `❌ ${data.error}`, data.success ? "success" : "error");
+    await loadDashboard();
 }
 
 function showStatus(msg, type) {

@@ -268,6 +268,8 @@ async def get_ltp(index: str, strike: int, option_type: str, expiry: str):
     if not current_broker.is_authenticated:
         return {"ltp": None}
 
+    index = index.upper()
+    option_type = option_type.upper()
     symbol = current_broker.get_option_symbol(index, strike, option_type, expiry)
     exchange = current_broker.get_exchange(index)
     ltp = resolve_live_ltp(symbol, exchange)
@@ -377,6 +379,56 @@ async def place_trade(req: TradeRequest):
         "live_ltp": live_ltp,
         "sl_price": sl_price,
         "order_attempts": attempts,
+    }
+
+
+@app.post("/api/trade/{trade_id}/close")
+async def close_trade(trade_id: str):
+    trade = trade_book.get(trade_id)
+    if not trade:
+        return {"success": False, "error": "Trade not found"}
+
+    if trade.get("status") != "OPEN":
+        return {"success": False, "error": f"Trade already {trade.get('status', 'closed').lower()}"}
+
+    if not current_broker.is_authenticated:
+        return {"success": False, "error": "Not authenticated"}
+
+    order_id, attempts = retry_place_order(
+        symbol=trade["symbol"],
+        exchange=current_broker.get_exchange(trade["index"]),
+        transaction_type="SELL",
+        quantity=trade["quantity"],
+        order_type="MARKET",
+        price=0,
+        trigger_price=0,
+    )
+
+    if not order_id:
+        return {"success": False, "error": "Exit order failed after retries"}
+
+    latest_ltp = resolve_live_ltp(
+        trade["symbol"],
+        current_broker.get_exchange(trade["index"]),
+        fallback=trade.get("ltp") or trade.get("entry_price"),
+    )
+    if latest_ltp is not None:
+        trade["ltp"] = latest_ltp
+        trade["pnl"] = (latest_ltp - trade["entry_price"]) * trade["quantity"]
+
+    trade["status"] = "CLOSED"
+    trade["closed_at"] = datetime.now().isoformat()
+    trade["exit_order_id"] = order_id
+    trade["exit_order_attempts"] = attempts
+
+    return {
+        "success": True,
+        "message": f"Trade {trade_id} closed",
+        "trade_id": trade_id,
+        "order_id": order_id,
+        "order_attempts": attempts,
+        "final_ltp": trade.get("ltp"),
+        "final_pnl": trade.get("pnl", 0),
     }
 
 
