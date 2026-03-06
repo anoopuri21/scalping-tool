@@ -39,7 +39,7 @@
         <div id="trade-form" class="card hidden">
             <h3>Place Trade</h3>
             <div class="form-row"><label>Expiry</label><div id="expiry-btns" class="btn-group"><span style="color:var(--muted)">Select index first</span></div></div>
-            <div class="form-row"><label>Option Type</label><div class="btn-group type-group"><button id="btn-ce" class="btn-opt" onclick="selectType('CE')">CE</button><button id="btn-pe" class="btn-opt" onclick="selectType('PE')">PE</button></div></div>
+            <div class="form-row"><label>Option Type</label><div class="btn-group type-group"><button id="btn-ce" class="btn-opt ce" onclick="selectType('CE')">CE</button><button id="btn-pe" class="btn-opt pe" onclick="selectType('PE')">PE</button></div></div>
             <div class="form-row"><label>Strike</label><select id="strike-select" onchange="onStrikeChange()"><option value="">Select Expiry First</option></select><span id="strike-ltp" class="ltp-badge hidden"></span></div>
             <div class="form-row"><label>Order Type</label><select id="order-type" onchange="onOrderTypeChange()"><option value="MARKET">MARKET</option><option value="LIMIT">LIMIT</option><option value="STOP_LIMIT">STOP_LIMIT</option></select></div>
             <div class="form-row"><label>Entry Price ₹</label><input type="number" id="entry-price" step="0.05" placeholder="Auto for MARKET, manual for LIMIT"></div>
@@ -73,7 +73,7 @@
                 <div><small>Positions</small><b id="metric-pos">0</b></div>
                 <div><small>Retried Orders</small><b id="metric-retries">0</b></div>
             </div>
-            <table class="trade-table"><thead><tr><th>ID</th><th>Symbol</th><th>Order</th><th>Qty</th><th>LTP</th><th>SL</th><th>PnL</th></tr></thead><tbody id="trades-body"><tr><td colspan="7">No open trades</td></tr></tbody></table>
+            <table class="trade-table"><thead><tr><th>ID</th><th>Symbol</th><th>Order</th><th>Qty</th><th>LTP</th><th>SL</th><th>PnL</th><th>Action</th></tr></thead><tbody id="trades-body"><tr><td colspan="8">No open trades</td></tr></tbody></table>
         </div>
     </div>
 

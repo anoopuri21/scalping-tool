@@ -99,6 +99,22 @@ def compute_trade_metrics() -> dict:
     }
 
 
+def resolve_live_ltp(symbol: str, exchange: str, fallback: float | None = None) -> float | None:
+    """Fetch live price with a small retry window for fast-moving market orders."""
+    ltp = current_broker.get_ltp(symbol, exchange)
+    if ltp is not None and ltp > 0:
+        return ltp
+
+    # Retry quickly to avoid transient quote misses during live trading.
+    for _ in range(2):
+        time.sleep(0.12)
+        ltp = current_broker.get_ltp(symbol, exchange)
+        if ltp is not None and ltp > 0:
+            return ltp
+
+    return fallback
+
+
 @app.get("/api/config")
 async def get_config():
     return {
@@ -252,9 +268,11 @@ async def get_ltp(index: str, strike: int, option_type: str, expiry: str):
     if not current_broker.is_authenticated:
         return {"ltp": None}
 
+    index = index.upper()
+    option_type = option_type.upper()
     symbol = current_broker.get_option_symbol(index, strike, option_type, expiry)
     exchange = current_broker.get_exchange(index)
-    ltp = current_broker.get_ltp(symbol, exchange)
+    ltp = resolve_live_ltp(symbol, exchange)
     return {"symbol": symbol, "ltp": ltp, "exchange": exchange}
 
 
@@ -293,7 +311,7 @@ async def place_trade(req: TradeRequest):
         return {"success": False, "error": "Invalid symbol"}
 
     exchange = current_broker.get_exchange(req.index)
-    live_ltp = current_broker.get_ltp(symbol, exchange)
+    live_ltp = resolve_live_ltp(symbol, exchange)
 
     if req.order_type == "MARKET":
         entry_price = live_ltp
@@ -364,6 +382,56 @@ async def place_trade(req: TradeRequest):
     }
 
 
+@app.post("/api/trade/{trade_id}/close")
+async def close_trade(trade_id: str):
+    trade = trade_book.get(trade_id)
+    if not trade:
+        return {"success": False, "error": "Trade not found"}
+
+    if trade.get("status") != "OPEN":
+        return {"success": False, "error": f"Trade already {trade.get('status', 'closed').lower()}"}
+
+    if not current_broker.is_authenticated:
+        return {"success": False, "error": "Not authenticated"}
+
+    order_id, attempts = retry_place_order(
+        symbol=trade["symbol"],
+        exchange=current_broker.get_exchange(trade["index"]),
+        transaction_type="SELL",
+        quantity=trade["quantity"],
+        order_type="MARKET",
+        price=0,
+        trigger_price=0,
+    )
+
+    if not order_id:
+        return {"success": False, "error": "Exit order failed after retries"}
+
+    latest_ltp = resolve_live_ltp(
+        trade["symbol"],
+        current_broker.get_exchange(trade["index"]),
+        fallback=trade.get("ltp") or trade.get("entry_price"),
+    )
+    if latest_ltp is not None:
+        trade["ltp"] = latest_ltp
+        trade["pnl"] = (latest_ltp - trade["entry_price"]) * trade["quantity"]
+
+    trade["status"] = "CLOSED"
+    trade["closed_at"] = datetime.now().isoformat()
+    trade["exit_order_id"] = order_id
+    trade["exit_order_attempts"] = attempts
+
+    return {
+        "success": True,
+        "message": f"Trade {trade_id} closed",
+        "trade_id": trade_id,
+        "order_id": order_id,
+        "order_attempts": attempts,
+        "final_ltp": trade.get("ltp"),
+        "final_pnl": trade.get("pnl", 0),
+    }
+
+
 @app.get("/api/dashboard")
 async def dashboard_data():
     if not current_broker.is_authenticated:
@@ -376,6 +444,12 @@ async def dashboard_data():
         ltp_map = current_broker.get_quotes_batch(symbols)
         for trade in open_trades:
             ltp = ltp_map.get(trade["symbol"])
+            if ltp is None:
+                ltp = resolve_live_ltp(
+                    trade["symbol"],
+                    current_broker.get_exchange(trade["index"]),
+                    fallback=trade.get("ltp"),
+                )
             if ltp is not None:
                 trade["ltp"] = ltp
                 trade["pnl"] = (ltp - trade["entry_price"]) * trade["quantity"]
@@ -395,7 +469,7 @@ async def dashboard_ws(websocket: WebSocket):
     try:
         while True:
             await websocket.send_json(await dashboard_data())
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
     except WebSocketDisconnect:
         return
 

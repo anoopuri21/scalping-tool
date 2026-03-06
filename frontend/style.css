@@ -480,3 +480,23 @@ select option.atm-option {
 #entry-price[readonly] {
     opacity: 0.75;
 }
+
+
+.btn-close-trade {
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid var(--red);
+    color: var(--red);
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.btn-close-trade:hover {
+    background: rgba(239, 68, 68, 0.28);
+}
+
+.trade-closed {
+    color: var(--muted);
+    font-size: 0.75rem;
+}

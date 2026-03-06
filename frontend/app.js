@@ -8,6 +8,8 @@ let strikesData = [];
 let suggestedSL = null;
 let dashboardSocket = null;
 let dashboardPollTimer = null;
+let indexPollTimer = null;
+let strikeRefreshTimer = null;
 let LOT_SIZE = { NIFTY: 65, BANKNIFTY: 30, SENSEX: 20 };
 
 document.addEventListener("DOMContentLoaded", init);
@@ -21,7 +23,7 @@ async function init() {
             showApp();
             await loadProfile();
             await loadIndexPrices();
-            setInterval(loadIndexPrices, 5000);
+            if (!indexPollTimer) indexPollTimer = setInterval(loadIndexPrices, 900);
             loadDashboard();
             startDashboardFeed();
         }
@@ -76,6 +78,7 @@ async function selectIndex(index) {
     selectedType = null;
     selectedStrike = null;
     suggestedSL = null;
+    stopStrikeRefresh();
     document.querySelectorAll(".index-card").forEach((el) => el.classList.toggle("selected", el.dataset.index === index));
     document.getElementById("trade-form").classList.remove("hidden");
     await loadExpiries();
@@ -94,47 +97,82 @@ async function selectExpiry(expiry) {
     selectedExpiry = expiry;
     document.querySelectorAll("[data-expiry]").forEach((el) => el.classList.toggle("selected", el.dataset.expiry === expiry));
     await loadStrikes();
+    startStrikeRefresh();
 }
 
-async function loadStrikes() {
+
+
+function startStrikeRefresh() {
+    stopStrikeRefresh();
+    if (!selectedIndex || !selectedExpiry) return;
+
+    strikeRefreshTimer = setInterval(async () => {
+        if (!selectedIndex || !selectedExpiry) return;
+        await loadStrikes({ keepSelection: true, silent: true });
+    }, 800);
+}
+
+function stopStrikeRefresh() {
+    if (strikeRefreshTimer) {
+        clearInterval(strikeRefreshTimer);
+        strikeRefreshTimer = null;
+    }
+}
+
+async function loadStrikes({ keepSelection = false, silent = false } = {}) {
+    const previousStrike = selectedStrike;
     const data = await fetch(`${API}/api/strikes/${selectedIndex}?expiry=${selectedExpiry}`).then((r) => r.json()).catch(() => ({}));
     strikesData = data.strikes || [];
+
     const select = document.getElementById("strike-select");
-    select.innerHTML = '<option value="">-- Select Strike --</option>' + strikesData.map((s) => `<option value="${s.strike}">${s.strike}${s.is_atm ? " ★" : ""}</option>`).join("");
-    const atm = strikesData.find((s) => s.is_atm);
-    if (atm) {
-        select.value = atm.strike;
-        selectedStrike = atm.strike;
+    const strikeOptions = '<option value="">-- Select Strike --</option>' + strikesData.map((s) => `<option value="${s.strike}">${s.strike}${s.is_atm ? " ★" : ""}</option>`).join("");
+    if (select.innerHTML !== strikeOptions) {
+        select.innerHTML = strikeOptions;
     }
-    updateEntryPrice();
-    await fetchSLReference();
+
+    const hasPrevious = keepSelection && previousStrike && strikesData.some((s) => s.strike === previousStrike);
+    if (hasPrevious) {
+        select.value = previousStrike;
+        selectedStrike = previousStrike;
+    } else {
+        const atm = strikesData.find((s) => s.is_atm);
+        if (atm) {
+            select.value = atm.strike;
+            selectedStrike = atm.strike;
+        }
+    }
+
+    await updateEntryPrice();
+    if (!silent) {
+        await fetchSLReference();
+    }
     validate();
 }
 
-function selectType(type) {
+async function selectType(type) {
     selectedType = type;
     document.getElementById("btn-ce").classList.toggle("selected", type === "CE");
     document.getElementById("btn-pe").classList.toggle("selected", type === "PE");
-    updateEntryPrice();
+    await updateEntryPrice();
     fetchSLReference();
     validate();
 }
 
 async function onStrikeChange() {
     selectedStrike = parseInt(document.getElementById("strike-select").value) || null;
-    updateEntryPrice();
+    await updateEntryPrice();
     await fetchSLReference();
     validate();
 }
 
-function onOrderTypeChange() {
+async function onOrderTypeChange() {
     const t = document.getElementById("order-type").value;
     const triggerWrap = document.getElementById("trigger-wrap");
     triggerWrap.classList.toggle("hidden", t !== "STOP_LIMIT");
     const entry = document.getElementById("entry-price");
     if (t === "MARKET") {
         entry.readOnly = true;
-        updateEntryPrice();
+        await updateEntryPrice();
     } else {
         entry.readOnly = false;
         entry.value = "";
@@ -150,13 +188,25 @@ function onSLModeChange() {
     updateSLPreview();
 }
 
-function updateEntryPrice() {
-    if (!selectedStrike || !selectedType) return;
+async function updateEntryPrice() {
+    if (!selectedStrike || !selectedType || !selectedIndex || !selectedExpiry) return;
     const strikeInfo = strikesData.find((s) => s.strike === selectedStrike);
-    if (!strikeInfo) return;
-
-    const ltp = selectedType === "CE" ? strikeInfo.ce_ltp : strikeInfo.pe_ltp;
     const ltpEl = document.getElementById("strike-ltp");
+
+    let ltp = strikeInfo ? (selectedType === "CE" ? strikeInfo.ce_ltp : strikeInfo.pe_ltp) : null;
+
+    if ((ltp == null || ltp <= 0) && !strikeInfo) {
+        await loadStrikes({ keepSelection: true, silent: true });
+        const refreshed = strikesData.find((s) => s.strike === selectedStrike);
+        ltp = refreshed ? (selectedType === "CE" ? refreshed.ce_ltp : refreshed.pe_ltp) : null;
+    }
+
+    if (ltp == null || ltp <= 0) {
+        const data = await fetch(`${API}/api/ltp?index=${selectedIndex}&strike=${selectedStrike}&option_type=${selectedType}&expiry=${selectedExpiry}`)
+            .then((r) => r.json())
+            .catch(() => ({}));
+        ltp = data.ltp;
+    }
 
     if (ltp != null && ltp > 0) {
         ltpEl.textContent = `LTP: ₹${ltp.toFixed(2)}`;
@@ -262,7 +312,13 @@ function renderDashboard(data) {
     document.getElementById("metric-pnl").textContent = `₹${(m.total_pnl || 0).toFixed(2)}`;
     document.getElementById("metric-pos").textContent = m.total_positions || 0;
     document.getElementById("metric-retries").textContent = m.orders_with_retries || 0;
-    document.getElementById("trades-body").innerHTML = (data.trades || []).map((t) => `<tr><td>${t.trade_id}</td><td>${t.symbol}</td><td>${t.order_type}</td><td>${t.quantity}</td><td>${(t.ltp || 0).toFixed(2)}</td><td>${(t.sl_price || 0).toFixed(2)}</td><td class="${(t.pnl || 0) >= 0 ? 'up' : 'down'}">${(t.pnl || 0).toFixed(2)}</td></tr>`).join("") || '<tr><td colspan="7">No open trades</td></tr>';
+    document.getElementById("trades-body").innerHTML = (data.trades || []).map((t) => {
+        const isOpen = t.status === "OPEN";
+        const action = isOpen
+            ? `<button class="btn-close-trade" onclick="closeTrade('${t.trade_id}')">Close</button>`
+            : `<span class="trade-closed">${t.status || "CLOSED"}</span>`;
+        return `<tr><td>${t.trade_id}</td><td>${t.symbol}</td><td>${t.order_type}</td><td>${t.quantity}</td><td>${(t.ltp || 0).toFixed(2)}</td><td>${(t.sl_price || 0).toFixed(2)}</td><td class="${(t.pnl || 0) >= 0 ? 'up' : 'down'}">${(t.pnl || 0).toFixed(2)}</td><td>${action}</td></tr>`;
+    }).join("") || '<tr><td colspan="8">No open trades</td></tr>';
 }
 
 function startDashboardFeed() {
@@ -278,6 +334,18 @@ function startDashboardFeed() {
     } catch {
         startFallbackPolling();
     }
+}
+
+
+
+async function closeTrade(tradeId) {
+    const data = await fetch(`${API}/api/trade/${tradeId}/close`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+    }).then((r) => r.json()).catch((e) => ({ success: false, error: e.message }));
+
+    showStatus(data.success ? `✅ ${data.message}` : `❌ ${data.error}`, data.success ? "success" : "error");
+    await loadDashboard();
 }
 
 function showStatus(msg, type) {
