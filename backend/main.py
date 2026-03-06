@@ -198,7 +198,11 @@ async def get_strikes(index: str, expiry: str = Query(...)):
 
     filtered = all_strikes[start:end]
     actual_atm = all_strikes[closest_idx]
-    chain_map = current_broker.get_option_chain_ltp(index)
+    chain_map = {}
+    if hasattr(current_broker, "get_option_ltp_for_strikes"):
+        chain_map = current_broker.get_option_ltp_for_strikes(index, expiry, filtered)
+    elif hasattr(current_broker, "get_option_chain_ltp"):
+        chain_map = current_broker.get_option_chain_ltp(index)
 
     strikes_data = []
     for strike in filtered:
@@ -214,7 +218,8 @@ async def get_strikes(index: str, expiry: str = Query(...)):
             "pe_symbol": pe_symbol,
         })
 
-    return {"strikes": strikes_data, "atm": actual_atm, "total": len(all_strikes), "has_ltp": True}
+    has_ltp = any(item.get("ce_ltp") is not None or item.get("pe_ltp") is not None for item in strikes_data)
+    return {"strikes": strikes_data, "atm": actual_atm, "total": len(all_strikes), "has_ltp": has_ltp}
 
 
 @app.get("/api/index-quote/{index}")
@@ -364,13 +369,22 @@ async def dashboard_data():
     if not current_broker.is_authenticated:
         return {"trades": [], "metrics": compute_trade_metrics()}
 
-    for trade in trade_book.values():
-        if trade["status"] != "OPEN":
-            continue
-        ltp = current_broker.get_ltp(trade["symbol"], current_broker.get_exchange(trade["index"]))
-        if ltp is not None:
-            trade["ltp"] = ltp
-            trade["pnl"] = (ltp - trade["entry_price"]) * trade["quantity"]
+    open_trades = [t for t in trade_book.values() if t["status"] == "OPEN"]
+
+    if hasattr(current_broker, "get_quotes_batch") and open_trades:
+        symbols = [t["symbol"] for t in open_trades if t.get("symbol")]
+        ltp_map = current_broker.get_quotes_batch(symbols)
+        for trade in open_trades:
+            ltp = ltp_map.get(trade["symbol"])
+            if ltp is not None:
+                trade["ltp"] = ltp
+                trade["pnl"] = (ltp - trade["entry_price"]) * trade["quantity"]
+    else:
+        for trade in open_trades:
+            ltp = current_broker.get_ltp(trade["symbol"], current_broker.get_exchange(trade["index"]))
+            if ltp is not None:
+                trade["ltp"] = ltp
+                trade["pnl"] = (ltp - trade["entry_price"]) * trade["quantity"]
 
     return {"trades": list(trade_book.values()), "metrics": compute_trade_metrics(), "updated_at": datetime.now().isoformat()}
 
