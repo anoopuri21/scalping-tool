@@ -7,6 +7,7 @@ let selectedStrike = null;
 let strikesData = [];
 let suggestedSL = null;
 let dashboardSocket = null;
+let dashboardPollTimer = null;
 let LOT_SIZE = { NIFTY: 65, BANKNIFTY: 30, SENSEX: 20 };
 
 document.addEventListener("DOMContentLoaded", init);
@@ -19,7 +20,7 @@ async function init() {
         if (status.authenticated) {
             showApp();
             await loadProfile();
-            loadIndexPrices();
+            await loadIndexPrices();
             setInterval(loadIndexPrices, 5000);
             loadDashboard();
             startDashboardFeed();
@@ -52,15 +53,21 @@ async function logout() { await fetch(`${API}/auth/logout`, { method: "POST" });
 async function loadProfile() { const data = await fetch(`${API}/auth/status`).then((r) => r.json()).catch(() => ({})); document.getElementById("user-name").textContent = data.user_name || data.user_id || "Trader"; }
 
 async function loadIndexPrices() {
-    for (const index of ["NIFTY", "BANKNIFTY", "SENSEX"]) {
-        const data = await fetch(`${API}/api/index-quote/${index}`).then((r) => r.json()).catch(() => ({}));
-        if (!data.price) continue;
+    const indexes = ["NIFTY", "BANKNIFTY", "SENSEX"];
+    const responses = await Promise.all(indexes.map((index) =>
+        fetch(`${API}/api/index-quote/${index}`).then((r) => r.json()).catch(() => ({}))
+    ));
+
+    indexes.forEach((index, i) => {
+        const data = responses[i] || {};
+        if (!data.price) return;
+
         document.getElementById(`${index.toLowerCase()}-price`).textContent = data.price.toLocaleString("en-IN", { maximumFractionDigits: 2 });
         const changeEl = document.getElementById(`${index.toLowerCase()}-change`);
         const sign = data.change >= 0 ? "+" : "";
         changeEl.textContent = `${sign}${(data.change || 0).toFixed(2)} (${sign}${(data.change_percent || 0).toFixed(2)}%)`;
         changeEl.className = `index-change ${data.change >= 0 ? "up" : "down"}`;
-    }
+    });
 }
 
 async function selectIndex(index) {
@@ -147,13 +154,19 @@ function updateEntryPrice() {
     if (!selectedStrike || !selectedType) return;
     const strikeInfo = strikesData.find((s) => s.strike === selectedStrike);
     if (!strikeInfo) return;
+
     const ltp = selectedType === "CE" ? strikeInfo.ce_ltp : strikeInfo.pe_ltp;
-    if (ltp) {
-        document.getElementById("strike-ltp").textContent = `LTP: ₹${ltp.toFixed(2)}`;
-        document.getElementById("strike-ltp").classList.remove("hidden");
+    const ltpEl = document.getElementById("strike-ltp");
+
+    if (ltp != null && ltp > 0) {
+        ltpEl.textContent = `LTP: ₹${ltp.toFixed(2)}`;
+        ltpEl.classList.remove("hidden");
         if (document.getElementById("order-type").value === "MARKET") {
             document.getElementById("entry-price").value = ltp.toFixed(2);
         }
+    } else {
+        ltpEl.textContent = "LTP unavailable";
+        ltpEl.classList.remove("hidden");
     }
     updateSLPreview();
 }
@@ -253,12 +266,17 @@ function renderDashboard(data) {
 }
 
 function startDashboardFeed() {
+    const startFallbackPolling = () => {
+        if (!dashboardPollTimer) dashboardPollTimer = setInterval(loadDashboard, 2500);
+    };
+
     try {
         dashboardSocket = new WebSocket(API.replace("http", "ws") + "/ws/dashboard");
         dashboardSocket.onmessage = (e) => renderDashboard(JSON.parse(e.data));
-        dashboardSocket.onerror = () => setInterval(loadDashboard, 2500);
+        dashboardSocket.onerror = startFallbackPolling;
+        dashboardSocket.onclose = startFallbackPolling;
     } catch {
-        setInterval(loadDashboard, 2500);
+        startFallbackPolling();
     }
 }
 

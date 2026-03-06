@@ -3,6 +3,7 @@ from typing import Optional, List, Dict
 from datetime import datetime, timedelta
 import json
 import os
+import time
 from .base_broker import BaseBroker
 import config
 
@@ -17,7 +18,64 @@ class FyersBroker(BaseBroker):
     def __init__(self):
         super().__init__()
         self.fyers = None
+        self.quote_cache: Dict[str, tuple[float, float]] = {}
+        self.quote_cache_ttl = 1.5
         self._load_token()
+
+    @staticmethod
+    def _extract_quote_records(response: dict) -> List[dict]:
+        if not isinstance(response, dict):
+            return []
+        records = response.get("d")
+        if isinstance(records, list):
+            return records
+        data = response.get("data")
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict) and isinstance(data.get("d"), list):
+            return data.get("d")
+        return []
+
+    @staticmethod
+    def _extract_ltp(record: dict) -> Optional[float]:
+        if not isinstance(record, dict):
+            return None
+        v = record.get("v", {})
+        for key in ("lp", "ltp", "last_price"):
+            value = v.get(key) if isinstance(v, dict) else None
+            if value is None:
+                value = record.get(key)
+            if value is not None:
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    continue
+        return None
+
+    def get_quotes_batch(self, symbols: List[str]) -> Dict[str, float]:
+        now = time.time()
+        result: Dict[str, float] = {}
+        pending: List[str] = []
+
+        for symbol in symbols:
+            cached = self.quote_cache.get(symbol)
+            if cached and (now - cached[1]) <= self.quote_cache_ttl:
+                result[symbol] = cached[0]
+            else:
+                pending.append(symbol)
+
+        if not pending:
+            return result
+
+        response = self.fyers.quotes({"symbols": ",".join(pending)})
+        for item in self._extract_quote_records(response):
+            symbol = item.get("n") or item.get("symbol")
+            ltp = self._extract_ltp(item)
+            if symbol and ltp is not None and ltp > 0:
+                result[symbol] = ltp
+                self.quote_cache[symbol] = (ltp, now)
+
+        return result
     
     def _load_token(self):
         if os.path.exists(self.TOKEN_FILE):
@@ -142,16 +200,15 @@ class FyersBroker(BaseBroker):
             symbols = ",".join(config.FYERS_INDEX_SYMBOLS.values())
             response = self.fyers.quotes({"symbols": symbols})
             
-            if response.get("s") == "ok" and "d" in response:
-                for item in response["d"]:
-                    symbol = item.get("n", "")
-                    price = item.get("v", {}).get("lp", 0)
-                    
-                    for name, sym in config.FYERS_INDEX_SYMBOLS.items():
-                        if symbol == sym and price > 0:
-                            self.index_prices[name] = price
-                            print(f"  {name}: {price}")
-                            break
+            for item in self._extract_quote_records(response):
+                symbol = item.get("n", "")
+                price = self._extract_ltp(item) or 0
+
+                for name, sym in config.FYERS_INDEX_SYMBOLS.items():
+                    if symbol == sym and price > 0:
+                        self.index_prices[name] = price
+                        print(f"  {name}: {price}")
+                        break
         except Exception as e:
             print(f"⚠️ Fyers: Index price fetch failed - {e}")
     
@@ -224,18 +281,21 @@ class FyersBroker(BaseBroker):
                 return None
             
             response = self.fyers.quotes({"symbols": symbol})
-            
-            if response.get("s") == "ok" and "d" in response and len(response["d"]) > 0:
-                v = response["d"][0].get("v", {})
-                price = v.get("lp", 0)
-                
+            records = self._extract_quote_records(response)
+
+            if records:
+                first = records[0]
+                v = first.get("v", {}) if isinstance(first.get("v"), dict) else {}
+                price = self._extract_ltp(first) or 0
+
                 if price > 0:
                     self.index_prices[index.upper()] = price
-                
+                    self.quote_cache[symbol] = (price, time.time())
+
                 return {
                     "price": price,
-                    "change": v.get("ch", 0),
-                    "change_percent": v.get("chp", 0),
+                    "change": float(v.get("ch") or first.get("ch") or 0),
+                    "change_percent": float(v.get("chp") or first.get("chp") or 0),
                 }
             
             # Return cached
@@ -253,16 +313,41 @@ class FyersBroker(BaseBroker):
         try:
             if not symbol.startswith(("NSE:", "NFO:", "BSE:", "BFO:")):
                 symbol = f"{exchange or 'NFO'}:{symbol}"
-            
-            response = self.fyers.quotes({"symbols": symbol})
-            
-            if response.get("s") == "ok" and "d" in response and len(response["d"]) > 0:
-                ltp = response["d"][0].get("v", {}).get("lp")
-                return float(ltp) if ltp is not None else None
-            return None
+            return self.get_quotes_batch([symbol]).get(symbol)
         except Exception as e:
             print(f"❌ Fyers: LTP failed - {e}")
             return None
+
+    def get_option_ltp_for_strikes(self, index: str, expiry: str, strikes: List[int]) -> Dict[int, dict]:
+        chain_map: Dict[int, dict] = {}
+        symbols: List[str] = []
+
+        for strike in strikes:
+            ce_symbol = self.get_option_symbol(index, strike, "CE", expiry)
+            pe_symbol = self.get_option_symbol(index, strike, "PE", expiry)
+            chain_map[strike] = {
+                "ce_ltp": None,
+                "pe_ltp": None,
+                "ce_symbol": ce_symbol,
+                "pe_symbol": pe_symbol,
+            }
+            if ce_symbol:
+                symbols.append(ce_symbol)
+            if pe_symbol:
+                symbols.append(pe_symbol)
+
+        if not symbols:
+            return chain_map
+
+        ltp_map = self.get_quotes_batch(symbols)
+        for strike, info in chain_map.items():
+            ce_symbol = info.get("ce_symbol")
+            pe_symbol = info.get("pe_symbol")
+            if ce_symbol in ltp_map:
+                info["ce_ltp"] = ltp_map[ce_symbol]
+            if pe_symbol in ltp_map:
+                info["pe_ltp"] = ltp_map[pe_symbol]
+        return chain_map
 
     def get_option_chain_ltp(self, index: str) -> Dict[int, dict]:
         """Fetch option chain and map strike -> {ce_ltp, pe_ltp, ce_symbol, pe_symbol}."""
