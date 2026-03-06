@@ -219,10 +219,27 @@ async def get_strikes(index: str, expiry: str = Query(...)):
 
 @app.get("/api/index-quote/{index}")
 async def get_index_quote(index: str):
+    index_name = index.upper()
+    fallback_price = config.DEFAULT_ATM.get(index_name, 22500)
+
     if not current_broker.is_authenticated:
-        return {"price": None}
-    quote = current_broker.get_index_quote(index)
-    return quote if quote else {"price": None}
+        return {
+            "price": fallback_price,
+            "change": 0,
+            "change_percent": 0,
+            "is_fallback": True,
+        }
+
+    quote = current_broker.get_index_quote(index_name)
+    if quote and quote.get("price"):
+        return {**quote, "is_fallback": False}
+
+    return {
+        "price": fallback_price,
+        "change": 0,
+        "change_percent": 0,
+        "is_fallback": True,
+    }
 
 
 @app.get("/api/ltp")
